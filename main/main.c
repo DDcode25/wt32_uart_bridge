@@ -148,7 +148,7 @@ void app_main(void)
      * раскладкой пинов или испорчена сохранением из устаревшей вкладки.
      * Не чиним молча — но и не затираем чужие настройки: громко пишем,
      * что именно не так, и продолжаем. */
-    char cfg_problem[160];
+    char cfg_problem[200];
     if (config_manager_validate(&s_config, cfg_problem, sizeof(cfg_problem)) != ESP_OK) {
         ESP_LOGE(TAG, "!!! конфигурация каналов некорректна: %s", cfg_problem);
         ESP_LOGE(TAG, "!!! исправьте назначение GPIO в web-интерфейсе");

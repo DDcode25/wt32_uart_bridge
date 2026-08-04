@@ -1,5 +1,6 @@
 #include <string.h>
 #include <stdlib.h>
+#include <stdarg.h>
 #include <arpa/inet.h>
 #include "config_manager.h"
 #include "board_config.h"
@@ -159,6 +160,35 @@ static bool in_list(int pin, const int *list, size_t n)
     return false;
 }
 
+/* snprintf режет по байтам и оставляет обрубок многобайтового символа —
+ * в HTTP-ответе и в логе это выглядит как «доступен тольк<мусор>». */
+static void trim_utf8(char *s)
+{
+    size_t len = strlen(s);
+    size_t i = len;
+    while (i > 0 && ((unsigned char)s[i - 1] & 0xC0) == 0x80) i--;  /* хвостовые байты */
+    if (i == 0) return;
+
+    unsigned char lead = (unsigned char)s[i - 1];
+    size_t need = lead < 0x80            ? 1 :
+                  (lead & 0xE0) == 0xC0  ? 2 :
+                  (lead & 0xF0) == 0xE0  ? 3 :
+                  (lead & 0xF8) == 0xF0  ? 4 : 1;
+    if ((i - 1) + need > len) s[i - 1] = '\0';   /* символ не поместился целиком */
+}
+
+static esp_err_t reject(char *reason, size_t len, const char *fmt, ...)
+{
+    if (reason && len) {
+        va_list ap;
+        va_start(ap, fmt);
+        vsnprintf(reason, len, fmt, ap);
+        va_end(ap);
+        trim_utf8(reason);
+    }
+    return ESP_ERR_INVALID_ARG;
+}
+
 esp_err_t config_manager_validate(const app_config_t *cfg, char *reason, size_t reason_len)
 {
     static const int usable[]     = BOARD_USABLE_IO_GPIOS;
@@ -187,9 +217,8 @@ esp_err_t config_manager_validate(const app_config_t *cfg, char *reason, size_t 
             int pin = pins[k].pin;
             if (pin < 0) continue;              /* -1 = не используется */
             if (pin >= (int)sizeof(owner)) {
-                if (reason) snprintf(reason, reason_len,
+                return reject(reason, reason_len,
                     "%s: %s GPIO%d не существует", u->name, pins[k].what, pin);
-                return ESP_ERR_INVALID_ARG;
             }
 
             bool ok = in_list(pin, usable, sizeof(usable) / sizeof(usable[0]));
@@ -197,10 +226,9 @@ esp_err_t config_manager_validate(const app_config_t *cfg, char *reason, size_t 
                 ok = in_list(pin, input_only, sizeof(input_only) / sizeof(input_only[0]));
             }
             if (!ok) {
-                if (reason) snprintf(reason, reason_len,
-                    "%s: GPIO%d недоступен под %s (не выведен на плату, занят Ethernet/консолью "
-                    "или доступен только на вход)", u->name, pin, pins[k].what);
-                return ESP_ERR_INVALID_ARG;
+                return reject(reason, reason_len,
+                    "%s: GPIO%d нельзя под %s — не выведен на плату, занят Ethernet/консолью "
+                    "или только на вход", u->name, pin, pins[k].what);
             }
 
             /* Один провод на приём и передачу — легальный режим, но
@@ -210,20 +238,18 @@ esp_err_t config_manager_validate(const app_config_t *cfg, char *reason, size_t 
                 continue;
             }
             if (owner[pin] >= 0) {
-                if (reason) snprintf(reason, reason_len,
+                return reject(reason, reason_len,
                     "GPIO%d занят дважды: %s (%s) и %s", pin, u->name, pins[k].what,
                     cfg->uart[owner[pin]].name);
-                return ESP_ERR_INVALID_ARG;
             }
             owner[pin] = (int8_t)i;
         }
 
         /* TX==RX допустим только в однопроводном half-duplex. */
         if (u->tx_gpio == u->rx_gpio && u->duplex != UART_DUPLEX_HALF_SINGLE_WIRE) {
-            if (reason) snprintf(reason, reason_len,
-                "%s: RX и TX на GPIO%d, но канал не в режиме однопроводного half-duplex",
+            return reject(reason, reason_len,
+                "%s: RX и TX на GPIO%d вне однопроводного half-duplex",
                 u->name, u->tx_gpio);
-            return ESP_ERR_INVALID_ARG;
         }
     }
 

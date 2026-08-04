@@ -228,7 +228,7 @@ static esp_err_t config_post(httpd_req_t *req)
         return ESP_FAIL;
     }
 
-    char reason[160];
+    char reason[200];
     if (config_manager_validate(tmp, reason, sizeof(reason)) != ESP_OK) {
         ESP_LOGW(TAG, "config rejected: %s", reason);
         free(tmp);
