@@ -19,6 +19,13 @@ static esp_netif_t     *s_eth_netif = NULL;
 static esp_eth_handle_t s_eth_handle = NULL;
 static netmgr_status_t  s_status;
 static esp_timer_handle_t s_link_hint_timer = NULL;
+static esp_timer_handle_t s_dhcp_fallback_timer = NULL;
+
+/* Сколько ждать аренду DHCP, прежде чем поднять статический адрес. */
+#define NETMGR_DHCP_FALLBACK_MS  30000
+
+static void dhcp_fallback_arm(void);
+static void dhcp_fallback_cancel(void);
 
 /* Отложенная подсказка: если через несколько секунд после старта линка
  * так и нет, почти всегда виноват кабель, порт или питание PHY. */
@@ -61,6 +68,9 @@ static void eth_event_handler(void *arg, esp_event_base_t base, int32_t id, void
             s_status.full_duplex = (duplex == ETH_DUPLEX_FULL);
             ESP_LOGI(TAG, "Ethernet link UP (%d Mbps, %s duplex)",
                      s_status.link_speed_mbps, s_status.full_duplex ? "full" : "half");
+            /* Отсчёт до фолбэка идёт от появления линка, а не от старта:
+             * пока кабель не воткнут, ждать аренду бессмысленно. */
+            dhcp_fallback_arm();
             break;
         }
         case ETHERNET_EVENT_DISCONNECTED:
@@ -70,6 +80,7 @@ static void eth_event_handler(void *arg, esp_event_base_t base, int32_t id, void
             s_status.link_down_count++;
             s_status.last_link_change_ms = (uint32_t)(esp_timer_get_time() / 1000);
             ESP_LOGW(TAG, "Ethernet link DOWN");
+            dhcp_fallback_cancel();
             break;
         case ETHERNET_EVENT_START:
             ESP_LOGI(TAG, "Ethernet started");
@@ -85,12 +96,80 @@ static void eth_event_handler(void *arg, esp_event_base_t base, int32_t id, void
 static void got_ip_handler(void *arg, esp_event_base_t base, int32_t id, void *data)
 {
     ip_event_got_ip_t *event = (ip_event_got_ip_t *)data;
+    dhcp_fallback_cancel();   /* аренда пришла — фолбэк не нужен */
     s_status.got_ip  = true;
     s_status.ip      = event->ip_info.ip.addr;
     s_status.netmask = event->ip_info.netmask.addr;
     s_status.gateway = event->ip_info.gw.addr;
     ESP_LOGI(TAG, "Got IP: " IPSTR " mask " IPSTR " gw " IPSTR,
              IP2STR(&event->ip_info.ip), IP2STR(&event->ip_info.netmask), IP2STR(&event->ip_info.gw));
+}
+
+/* Применение статического адреса. Вынесено отдельно, потому что этим же
+ * путём идёт аварийный фолбэк, когда DHCP не ответил (см. dhcp_fallback_cb).
+ * Без ESP_ERROR_CHECK: из таймера падать с abort() нельзя. */
+static esp_err_t apply_static_ip(const netmgr_config_t *cfg)
+{
+    esp_netif_dhcpc_stop(s_eth_netif);
+
+    esp_netif_ip_info_t ip_info = {
+        .ip      = { .addr = cfg->static_ip },
+        .netmask = { .addr = cfg->static_netmask },
+        .gw      = { .addr = cfg->static_gateway },
+    };
+    esp_err_t err = esp_netif_set_ip_info(s_eth_netif, &ip_info);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "esp_netif_set_ip_info failed: %s", esp_err_to_name(err));
+        return err;
+    }
+
+    esp_netif_dns_info_t dns = { .ip.type = ESP_IPADDR_TYPE_V4 };
+    dns.ip.u_addr.ip4.addr = cfg->static_dns;
+    esp_netif_set_dns_info(s_eth_netif, ESP_NETIF_DNS_MAIN, &dns);
+
+    s_status.got_ip  = true;
+    s_status.ip      = cfg->static_ip;
+    s_status.netmask = cfg->static_netmask;
+    s_status.gateway = cfg->static_gateway;
+    return ESP_OK;
+}
+
+/* DHCP не ответил за NETMGR_DHCP_FALLBACK_MS. Без этого плата осталась бы
+ * с 0.0.0.0 навсегда: настройки меняются только через web, а он недоступен
+ * без адреса, так что штатного пути восстановления просто нет. */
+static void dhcp_fallback_cb(void *arg)
+{
+    (void)arg;
+    if (s_status.got_ip) return;   /* аренда всё-таки пришла — гонка */
+
+    ESP_LOGW(TAG, "no DHCP lease in %d s - falling back to the static address",
+             NETMGR_DHCP_FALLBACK_MS / 1000);
+    if (apply_static_ip(&s_cfg) == ESP_OK) {
+        esp_ip4_addr_t addr = { .addr = s_status.ip };
+        ESP_LOGW(TAG, "fallback address " IPSTR " (DHCP is retried on next boot)",
+                 IP2STR(&addr));
+    }
+}
+
+/* Взводится на link up, снимается по факту получения аренды. */
+static void dhcp_fallback_arm(void)
+{
+    if (!s_cfg.use_dhcp || s_status.got_ip) return;
+
+    if (!s_dhcp_fallback_timer) {
+        const esp_timer_create_args_t targs = {
+            .callback = dhcp_fallback_cb,
+            .name = "dhcp_fallback",
+        };
+        if (esp_timer_create(&targs, &s_dhcp_fallback_timer) != ESP_OK) return;
+    }
+    esp_timer_stop(s_dhcp_fallback_timer);   /* перевзвод при рестарте линка */
+    esp_timer_start_once(s_dhcp_fallback_timer, NETMGR_DHCP_FALLBACK_MS * 1000ULL);
+}
+
+static void dhcp_fallback_cancel(void)
+{
+    if (s_dhcp_fallback_timer) esp_timer_stop(s_dhcp_fallback_timer);
 }
 
 static esp_err_t configure_ip(const netmgr_config_t *cfg)
@@ -104,27 +183,14 @@ static esp_err_t configure_ip(const netmgr_config_t *cfg)
             ESP_LOGE(TAG, "dhcpc_start failed: %s", esp_err_to_name(err));
             return err;
         }
-        ESP_LOGI(TAG, "DHCP client enabled");
-    } else {
-        esp_netif_dhcpc_stop(s_eth_netif);
-        esp_netif_ip_info_t ip_info = {
-            .ip      = { .addr = cfg->static_ip },
-            .netmask = { .addr = cfg->static_netmask },
-            .gw      = { .addr = cfg->static_gateway },
-        };
-        ESP_ERROR_CHECK(esp_netif_set_ip_info(s_eth_netif, &ip_info));
-
-        esp_netif_dns_info_t dns = { .ip.type = ESP_IPADDR_TYPE_V4 };
-        dns.ip.u_addr.ip4.addr = cfg->static_dns;
-        esp_netif_set_dns_info(s_eth_netif, ESP_NETIF_DNS_MAIN, &dns);
-
-        s_status.got_ip  = true;
-        s_status.ip      = cfg->static_ip;
-        s_status.netmask = cfg->static_netmask;
-        s_status.gateway = cfg->static_gateway;
-        ESP_LOGI(TAG, "Static IP configured");
+        ESP_LOGI(TAG, "DHCP client enabled (static fallback after %d s)",
+                 NETMGR_DHCP_FALLBACK_MS / 1000);
+        return ESP_OK;
     }
-    return ESP_OK;
+
+    esp_err_t err = apply_static_ip(cfg);
+    if (err == ESP_OK) ESP_LOGI(TAG, "Static IP configured");
+    return err;
 }
 
 esp_err_t network_manager_init(const netmgr_config_t *cfg)
