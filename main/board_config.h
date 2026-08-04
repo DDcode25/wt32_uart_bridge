@@ -105,9 +105,20 @@
 #define BOARD_UART1_DEFAULT_RX_GPIO   33
 #define BOARD_UART1_DEFAULT_TX_GPIO   32
 #define BOARD_UART1_DEFAULT_NAME      "UART1_CRSF"
-/* У TBS Crossfire штатная скорость CRSF — 420000. Здесь 400000, как
- * используют некоторые сборки ELRS. Меняется в web без пересборки. */
+/* У TBS Crossfire штатная скорость CRSF — 420000. Здесь 400000: именно
+ * её показывает EdgeTX в Model Setup -> External RF -> Baudrate на
+ * RadioMaster TX16S. Меняется в web без пересборки. */
 #define BOARD_UART1_DEFAULT_BAUD      400000
+
+/* Инверсия приёма включена по умолчанию.
+ *
+ * Сам протокол CRSF не инвертирован, и приёмник подключается напрямую.
+ * Но пин S.Port модульного отсека пульта идёт через инвертор, и именно
+ * оттуда снимается CRSF при подключении пульта как источника команд.
+ * Проверено на TX16S: без инверсии поток выглядит мусором на любой
+ * скорости, с инверсией кадры собираются с нулём ошибок CRC.
+ * При прямом подключении CRSF-приёмника инверсию нужно выключить. */
+#define BOARD_UART1_DEFAULT_INVERT_RX 1
 
 #define BOARD_UART2_DEFAULT_RX_GPIO   17
 #define BOARD_UART2_DEFAULT_TX_GPIO   5

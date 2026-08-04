@@ -64,6 +64,7 @@ void uart_manager_default_config(uint8_t channel_id, uart_mgr_channel_cfg_t *out
             out_cfg->rx_gpio = BOARD_UART1_DEFAULT_RX_GPIO;
             out_cfg->tx_gpio = BOARD_UART1_DEFAULT_TX_GPIO;
             out_cfg->baud_rate = BOARD_UART1_DEFAULT_BAUD;
+            out_cfg->invert_rx = BOARD_UART1_DEFAULT_INVERT_RX ? true : false;
             out_cfg->protocol = PROTO_MODE_CRSF;
             out_cfg->rx_watchdog_timeout_ms = 500; /* низкая задержка failsafe */
             break;

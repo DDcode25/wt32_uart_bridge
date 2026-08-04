@@ -279,6 +279,7 @@ void config_manager_apply_profile(app_config_t *cfg, config_profile_t profile)
             /* UART1 CRSF, UART2 MAVLink, UART0 AUX RAW */
             cfg->uart[1].protocol = PROTO_MODE_CRSF;
             cfg->uart[1].baud_rate = BOARD_UART1_DEFAULT_BAUD;
+            cfg->uart[1].invert_rx = BOARD_UART1_DEFAULT_INVERT_RX ? true : false;
             cfg->transport[1].mode = NET_MODE_UDP;
             cfg->transport[1].udp_listen_port = 14555;
 
@@ -312,6 +313,7 @@ void config_manager_apply_profile(app_config_t *cfg, config_profile_t profile)
             /* Управление: CRSF на UART1 (или S.Bus — переключается вручную) */
             cfg->uart[1].protocol = PROTO_MODE_CRSF;
             cfg->uart[1].baud_rate = BOARD_UART1_DEFAULT_BAUD;
+            cfg->uart[1].invert_rx = BOARD_UART1_DEFAULT_INVERT_RX ? true : false;
             cfg->uart[1].rx_watchdog_timeout_ms = 500;
             cfg->transport[1].mode = NET_MODE_UDP;
             cfg->transport[1].udp_listen_port = 14555;
