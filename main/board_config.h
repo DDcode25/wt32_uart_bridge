@@ -87,17 +87,26 @@
  *   2, 12, 15, 35, 36, 39 (35/36/39 — только вход!)
  * ======================================================================= */
 
+/* Скорости вынесены сюда намеренно: раньше они были литералами в
+ * uart_manager.c и продублированы в каждом профиле config_manager.c,
+ * так что смена значения требовала правки в трёх местах — и любое
+ * забытое расходилось с остальными. */
 #define BOARD_UART1_DEFAULT_RX_GPIO   33
 #define BOARD_UART1_DEFAULT_TX_GPIO   32
 #define BOARD_UART1_DEFAULT_NAME      "UART1_CRSF"
+/* У TBS Crossfire штатная скорость CRSF — 420000. Здесь 400000, как
+ * используют некоторые сборки ELRS. Меняется в web без пересборки. */
+#define BOARD_UART1_DEFAULT_BAUD      400000
 
 #define BOARD_UART2_DEFAULT_RX_GPIO   17
 #define BOARD_UART2_DEFAULT_TX_GPIO   14
 #define BOARD_UART2_DEFAULT_NAME      "UART2_MAVLINK"
+#define BOARD_UART2_DEFAULT_BAUD      115200
 
 #define BOARD_UART0_DEFAULT_RX_GPIO   4
 #define BOARD_UART0_DEFAULT_TX_GPIO   5
 #define BOARD_UART0_DEFAULT_NAME      "UART0_AUX"
+#define BOARD_UART0_DEFAULT_BAUD      57600
 
 /* Совместимый альтернативный профиль из ТЗ (CRSF на UART1, MAVLink
  * на отдельном UART2 RX15/TX14). GPIO15 — strapping-пин (MTDO), влияет

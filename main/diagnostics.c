@@ -134,7 +134,7 @@ size_t diagnostics_log_dump(char *out, size_t out_size)
     size_t used = 0;
 
     /* Копирование через memcpy, а не побайтовым циклом: критическая
-     * секция гасит прерывания, а канал на 420000 бод их ждать не любит. */
+     * секция гасит прерывания, а канал на 400000 бод их ждать не любит. */
     portENTER_CRITICAL_SAFE(&s_log_mux);
 
     size_t pinned = s_log_pinned_len;

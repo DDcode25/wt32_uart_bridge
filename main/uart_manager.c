@@ -53,7 +53,7 @@ void uart_manager_default_config(uint8_t channel_id, uart_mgr_channel_cfg_t *out
             strncpy(out_cfg->name, BOARD_UART1_DEFAULT_NAME, UART_MGR_MAX_NAME_LEN - 1);
             out_cfg->rx_gpio = BOARD_UART1_DEFAULT_RX_GPIO;
             out_cfg->tx_gpio = BOARD_UART1_DEFAULT_TX_GPIO;
-            out_cfg->baud_rate = 420000;
+            out_cfg->baud_rate = BOARD_UART1_DEFAULT_BAUD;
             out_cfg->protocol = PROTO_MODE_CRSF;
             out_cfg->rx_watchdog_timeout_ms = 500; /* низкая задержка failsafe */
             break;
@@ -61,7 +61,7 @@ void uart_manager_default_config(uint8_t channel_id, uart_mgr_channel_cfg_t *out
             strncpy(out_cfg->name, BOARD_UART2_DEFAULT_NAME, UART_MGR_MAX_NAME_LEN - 1);
             out_cfg->rx_gpio = BOARD_UART2_DEFAULT_RX_GPIO;
             out_cfg->tx_gpio = BOARD_UART2_DEFAULT_TX_GPIO;
-            out_cfg->baud_rate = 115200;
+            out_cfg->baud_rate = BOARD_UART2_DEFAULT_BAUD;
             out_cfg->protocol = PROTO_MODE_MAVLINK;
             out_cfg->rx_watchdog_timeout_ms = 5000;
             break;
@@ -70,7 +70,7 @@ void uart_manager_default_config(uint8_t channel_id, uart_mgr_channel_cfg_t *out
             strncpy(out_cfg->name, BOARD_UART0_DEFAULT_NAME, UART_MGR_MAX_NAME_LEN - 1);
             out_cfg->rx_gpio = BOARD_UART0_DEFAULT_RX_GPIO;
             out_cfg->tx_gpio = BOARD_UART0_DEFAULT_TX_GPIO;
-            out_cfg->baud_rate = 57600;
+            out_cfg->baud_rate = BOARD_UART0_DEFAULT_BAUD;
             out_cfg->protocol = PROTO_MODE_RAW;
             out_cfg->rx_watchdog_timeout_ms = 0; /* AUX по умолчанию без watchdog */
             break;

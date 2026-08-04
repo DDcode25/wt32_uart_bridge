@@ -161,7 +161,7 @@ void config_manager_apply_profile(app_config_t *cfg, config_profile_t profile)
         case PROFILE_A_SINELINK:
             /* UART1 CRSF, UART2 MAVLink, UART0 AUX RAW */
             cfg->uart[1].protocol = PROTO_MODE_CRSF;
-            cfg->uart[1].baud_rate = 420000;
+            cfg->uart[1].baud_rate = BOARD_UART1_DEFAULT_BAUD;
             cfg->transport[1].mode = NET_MODE_UDP;
             cfg->transport[1].udp_listen_port = 14555;
 
@@ -194,7 +194,7 @@ void config_manager_apply_profile(app_config_t *cfg, config_profile_t profile)
         case PROFILE_C_TX16S:
             /* Управление: CRSF на UART1 (или S.Bus — переключается вручную) */
             cfg->uart[1].protocol = PROTO_MODE_CRSF;
-            cfg->uart[1].baud_rate = 420000;
+            cfg->uart[1].baud_rate = BOARD_UART1_DEFAULT_BAUD;
             cfg->uart[1].rx_watchdog_timeout_ms = 500;
             cfg->transport[1].mode = NET_MODE_UDP;
             cfg->transport[1].udp_listen_port = 14555;

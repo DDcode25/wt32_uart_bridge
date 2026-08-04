@@ -93,7 +93,7 @@ ISR не используется для разбора: приём идёт ч�
 
 | Канал | Назначение | RX | TX | Скорость | Протокол |
 |---|---|---:|---:|---:|---|
-| UART1 | CRSF / S.Bus / управление | GPIO33 | GPIO32 | 420000 | CRSF |
+| UART1 | CRSF / S.Bus / управление | GPIO33 | GPIO32 | **400000** | CRSF |
 | UART2 | MAVLink / телеметрия | **GPIO17** | **GPIO14** | 115200 | MAVLink |
 | UART0 | AUX / RAW / RS-485 / S.Port | GPIO4 | **GPIO5** | 57600 | RAW |
 
@@ -363,7 +363,7 @@ Dashboard → «A — Sine.Link/Centurion». Получите:
 
 | Канал | Протокол | Сеть |
 |---|---|---|
-| UART1 | CRSF 420000 | UDP 14555 |
+| UART1 | CRSF 400000 | UDP 14555 |
 | UART2 | MAVLink 115200 | UDP 14550 + TCP server 1310 |
 | UART0 | RAW 57600 | UDP 14560 |
 
@@ -385,7 +385,7 @@ VPN-адрес): страница UART2 → «UDP destinations» → впиши�
 ### RadioMaster TX16S (Профиль C)
 
 - Управление: внешний CRSF-модуль или приёмник → UART1 (RX GPIO33).
-  CRSF 420000, watchdog 500 мс.
+  CRSF 400000, watchdog 500 мс.
 - Телеметрия: полётный контроллер → UART2, MAVLink 57600.
 - Каналы независимы: потеря управления не влияет на телеметрию.
 
