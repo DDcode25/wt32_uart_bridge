@@ -33,6 +33,10 @@ static void link_hint_cb(void *arg)
 {
     (void)arg;
     if (s_status.link_up) return;
+    /* Линк уже поднимался — значит кабель, порт и питание в порядке, а мы
+     * попали в пересогласование PHY. LAN8720 моргает линком на старте,
+     * и совет «проверьте кабель» в этот момент только сбивает с толку. */
+    if (s_status.link_up_count > 0) return;
     ESP_LOGW(TAG, "still no link: PHY answers over MDIO, but autonegotiation did not complete");
     ESP_LOGW(TAG, "check the cable, the switch port, and PHY power (5V rail is safer than 3V3)");
 }
