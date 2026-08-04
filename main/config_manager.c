@@ -202,20 +202,33 @@ esp_err_t config_manager_validate(const app_config_t *cfg, char *reason, size_t 
         const uart_mgr_channel_cfg_t *u = &cfg->uart[i];
         if (!u->enabled) continue;   /* выключенный канал пины не держит */
 
+        /* Раньше цикла: иначе одинаковые RX и TX ловятся проверкой на
+         * повторное использование и дают бессмысленное «GPIO33 занят
+         * дважды: UART1_CRSF и UART1_CRSF». */
+        if (u->tx_gpio == u->rx_gpio && u->duplex != UART_DUPLEX_HALF_SINGLE_WIRE) {
+            return reject(reason, reason_len,
+                "%s: RX и TX на GPIO%d вне однопроводного half-duplex",
+                u->name, u->tx_gpio);
+        }
+
         /* Пин, направление, можно ли брать вывод «только на вход».
          * Порядок важен: RX идёт первым и занимает вывод, поэтому
          * исключение для однопроводного режима проверяется на TX. */
         enum { P_RX = 0, P_TX = 1 };
-        const struct { int pin; const char *what; bool rx_ok; } pins[] = {
-            [P_RX] = { u->rx_gpio,       "RX",        true  },
-            [P_TX] = { u->tx_gpio,       "TX",        false },
-                     { u->rs485_de_gpio, "RS485 DE",  false },
-                     { u->rs485_re_gpio, "RS485 /RE", false },
+        const struct { int pin; const char *what; bool rx_ok; bool optional; } pins[] = {
+            [P_RX] = { u->rx_gpio,       "RX",        true,  false },
+            [P_TX] = { u->tx_gpio,       "TX",        false, false },
+                     { u->rs485_de_gpio, "RS485 DE",  false, true  },
+                     { u->rs485_re_gpio, "RS485 /RE", false, true  },
         };
 
         for (size_t k = 0; k < sizeof(pins) / sizeof(pins[0]); k++) {
             int pin = pins[k].pin;
-            if (pin < 0) continue;              /* -1 = не используется */
+            if (pin < 0) {
+                if (pins[k].optional) continue;   /* -1 = RS-485 не используется */
+                return reject(reason, reason_len,
+                    "%s: %s не задан (GPIO%d)", u->name, pins[k].what, pin);
+            }
             if (pin >= (int)sizeof(owner)) {
                 return reject(reason, reason_len,
                     "%s: %s GPIO%d не существует", u->name, pins[k].what, pin);
@@ -243,13 +256,6 @@ esp_err_t config_manager_validate(const app_config_t *cfg, char *reason, size_t 
                     cfg->uart[owner[pin]].name);
             }
             owner[pin] = (int8_t)i;
-        }
-
-        /* TX==RX допустим только в однопроводном half-duplex. */
-        if (u->tx_gpio == u->rx_gpio && u->duplex != UART_DUPLEX_HALF_SINGLE_WIRE) {
-            return reject(reason, reason_len,
-                "%s: RX и TX на GPIO%d вне однопроводного half-duplex",
-                u->name, u->tx_gpio);
         }
     }
 
@@ -468,10 +474,11 @@ esp_err_t config_manager_from_json(const char *json, app_config_t *out)
                 u->name[UART_MGR_MAX_NAME_LEN - 1] = '\0';
             }
             /* Валидация диапазонов — важна, т.к. JSON приходит из web */
-            int rx = json_int(c, "rx_gpio", u->rx_gpio);
-            int tx = json_int(c, "tx_gpio", u->tx_gpio);
-            if (rx >= 0 && rx <= 39) u->rx_gpio = rx;
-            if (tx >= 0 && tx <= 33) u->tx_gpio = tx; /* GPIO34-39 только вход */
+            /* Диапазоны здесь не фильтруем: молча оставить прежний пин
+             * значит ответить 200 на заведомо неверную настройку. Разбор
+             * только читает, судит config_manager_validate. */
+            u->rx_gpio = json_int(c, "rx_gpio", u->rx_gpio);
+            u->tx_gpio = json_int(c, "tx_gpio", u->tx_gpio);
 
             uint32_t baud = (uint32_t)json_int(c, "baud_rate", (int)u->baud_rate);
             if (baud >= 9600 && baud <= 5000000) u->baud_rate = baud;
