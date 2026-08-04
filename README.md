@@ -219,18 +219,26 @@ pio run -e wt32-eth01 -t upload
 ### Объединённая прошивка одним файлом
 
 ```bash
+Пути указаны для сборки через PlatformIO (`.pio/build/wt32-eth01/`).
+Для `idf.py` возьмите те же файлы из `build/`.
+
+```bash
 esptool.py --chip esp32 merge_bin -o firmware_merged.bin \
   --flash_mode dio --flash_freq 40m --flash_size 4MB \
-  0x1000 build/bootloader/bootloader.bin \
-  0x8000 build/partition_table/partition-table.bin \
-  0xe000 build/ota_data_initial.bin \
-  0x20000 build/wt32_uart_bridge.bin
+  0x1000  .pio/build/wt32-eth01/bootloader.bin \
+  0x8000  .pio/build/wt32-eth01/partitions.bin \
+  0xf000  .pio/build/wt32-eth01/ota_data_initial.bin \
+  0x20000 .pio/build/wt32-eth01/firmware.bin
 
 esptool.py --chip esp32 -p /dev/ttyUSB0 write_flash 0x0 firmware_merged.bin
 ```
 
 > Обратите внимание: при OTA-схеме приложение пишется по адресу
 > **0x20000** (не 0x10000), и обязателен `ota_data_initial.bin`.
+>
+> Адрес `ota_data_initial.bin` — **0xf000**, а не 0xe000: 0xe000 верен
+> для стандартной таблицы разделов ESP-IDF, а в `partitions.csv` этого
+> проекта раздел `otadata` лежит по 0xf000. Сверяйтесь с `partitions.csv`.
 
 ---
 
