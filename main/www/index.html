@@ -118,7 +118,10 @@ table.api code{background:#0d1015;border:1px solid var(--line);border-radius:4px
   <div class="card"><h2>Диагностика каналов</h2><div id="diagdetail"></div></div>
   <div class="card"><h2>Логирование</h2>
     <div class="row"><label>Подробный лог</label><input type="checkbox" id="d_verbose"></div>
-    <div class="row"><span class="hint" style="margin-left:190px">Отключите после отладки: подробный лог влияет на задержку рабочих UART.</span></div>
+    <div class="row"><span class="hint" style="margin-left:190px">По умолчанию выключен. Поднимает порог логов с WARN до INFO
+    и включает сводку раз в 30 с. На задержку каналов в установившемся режиме практически не влияет: в путях приёма
+    и передачи логирования нет вообще. Заметен только пока UART0 остаётся консолью — тогда каждая строка блокирует
+    задачу на время передачи по проводу (~8 мс на 115200). Нагружает канал не он, а дамп трафика.</span></div>
     <button class="act" onclick="save()">Сохранить</button>
   </div>
   <div class="card"><h2>Дамп трафика</h2>

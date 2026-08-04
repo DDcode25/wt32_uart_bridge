@@ -45,7 +45,12 @@ void config_manager_defaults(app_config_t *out)
     out->web_auth_enabled = false;
     strncpy(out->web_user, "admin", CONFIG_WEB_USER_LEN - 1);
     out->web_pw_is_initial = true;
-    out->verbose_log = true;
+    /* Подробный лог по умолчанию выключен. В установившемся режиме он
+     * почти ничего не стоит (в путях приёма/передачи логов нет вообще),
+     * но пока UART0 остаётся консолью, каждая строка блокирует задачу на
+     * время передачи по проводу — около 8 мс на 115200. Включается в
+     * web на вкладке Diagnostics. */
+    out->verbose_log = false;
     out->active_profile = PROFILE_NONE;
 }
 
