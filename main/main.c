@@ -121,9 +121,12 @@ void app_main(void)
         char pw[16];
         config_manager_generate_password(&s_config, pw, sizeof(pw));
         ESP_LOGW(TAG, "****************************************");
-        ESP_LOGW(TAG, " WEB LOGIN: %s", s_config.web_user);
-        ESP_LOGW(TAG, " WEB PASSWORD (first boot only): %s", pw);
-        ESP_LOGW(TAG, " Change it in Firmware/About page!");
+        ESP_LOGW(TAG, " WEB AUTH IS DISABLED - the UI is open to");
+        ESP_LOGW(TAG, " anyone on this network. Enable it on the");
+        ESP_LOGW(TAG, " Firmware/About page before field use.");
+        ESP_LOGW(TAG, " Credentials for when you do:");
+        ESP_LOGW(TAG, "   WEB LOGIN: %s", s_config.web_user);
+        ESP_LOGW(TAG, "   WEB PASSWORD (first boot only): %s", pw);
         ESP_LOGW(TAG, "****************************************");
         memset(pw, 0, sizeof(pw));
         config_manager_save(&s_config);

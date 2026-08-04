@@ -35,7 +35,13 @@ void config_manager_defaults(app_config_t *out)
         transport_default_config(i, &out->transport[i]);
         routing_manager_default_config(i, &out->routing[i]);
     }
-    out->web_auth_enabled = true;
+    /* Вход в web по умолчанию без пароля: так проще разворачивать плату
+     * в доверенной сети. Пароль всё равно генерируется и хранится (см.
+     * main.c), поэтому аутентификацию можно включить на странице
+     * Firmware/About, не сбрасывая конфигурацию.
+     * ВНИМАНИЕ: пока выключено, любой в сети может переконфигурировать
+     * каналы управления. Для полевого использования — включать. */
+    out->web_auth_enabled = false;
     strncpy(out->web_user, "admin", CONFIG_WEB_USER_LEN - 1);
     out->web_pw_is_initial = true;
     out->verbose_log = true;
