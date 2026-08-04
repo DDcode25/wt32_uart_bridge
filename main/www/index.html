@@ -114,6 +114,15 @@ td:first-child{color:var(--mut);width:48%}
     <div class="row"><span class="hint" style="margin-left:190px">Отключите после отладки: подробный лог влияет на задержку рабочих UART.</span></div>
     <button class="act" onclick="save()">Сохранить</button>
   </div>
+  <div class="card"><h2>Лог устройства</h2>
+    <p class="hint" style="margin:0 0 10px">Serial-консоль замолкает, как только канал AUX забирает UART0 — тогда это
+    единственный способ прочитать лог. Начало (старт каналов, передача UART0, получение адреса)
+    закреплено и не вытесняется, далее идут свежие записи.</p>
+    <button class="act ghost" onclick="loadLog()">Обновить</button>
+    <pre id="logbox" style="background:#0d1015;border:1px solid var(--line);border-radius:6px;padding:10px;
+      margin:10px 0 0;max-height:380px;overflow:auto;font-size:12px;line-height:1.45;
+      white-space:pre-wrap;word-break:break-word;color:var(--mut)">нажмите «Обновить»</pre>
+  </div>
 </div>
 
 <div class="page" id="p-fw">
@@ -153,7 +162,19 @@ function toast(m,bad){const t=document.getElementById('toast');t.textContent=m;t
 document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{
   document.querySelectorAll('nav button').forEach(x=>x.classList.remove('active'));b.classList.add('active');
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('on'));
-  document.getElementById('p-'+b.dataset.p).classList.add('on');});
+  document.getElementById('p-'+b.dataset.p).classList.add('on');
+  if(b.dataset.p==='diag')loadLog();});
+
+/* textContent, а не innerHTML: в лог попадает произвольный текст с устройства. */
+async function loadLog(){
+  const box=document.getElementById('logbox');
+  box.textContent='загрузка…';
+  try{
+    const r=await fetch('/api/log');
+    box.textContent=r.ok?await r.text():'ошибка '+r.status;
+  }catch(e){box.textContent='нет связи с устройством';}
+  box.scrollTop=box.scrollHeight;
+}
 
 function opts(arr,sel){return arr.map((v,i)=>`<option value="${i}"${i==sel?' selected':''}>${v}</option>`).join('');}
 
