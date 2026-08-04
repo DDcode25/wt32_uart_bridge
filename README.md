@@ -6,6 +6,11 @@
 Совместима с Sine.Link/Centurion, ArduPilot/MAVLink, Mission Planner,
 QGroundControl, RadioMaster TX16S и произвольными UART-устройствами.
 
+### ➡️ [Прошить плату прямо из браузера](https://ddcode25.github.io/wt32_uart_bridge/flash.html)
+
+Заливка через Web Serial без установки esptool и PlatformIO.
+Нужен Chrome или Edge на компьютере, переходник USB-UART и перемычка GPIO0 → GND.
+
 ---
 
 ## ⚠️ Статус проекта — прочитайте перед использованием

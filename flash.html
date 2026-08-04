@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Прошивка WT32-ETH01 UART ⇄ Ethernet Bridge</title>
+<style>
+  :root {
+    --bg: #ffffff;
+    --fg: #1f2328;
+    --muted: #59636e;
+    --border: #d1d9e0;
+    --accent: #0969da;
+    --warn-bg: #fff8c5;
+    --warn-border: #d4a72c;
+    --code-bg: #f6f8fa;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0d1117;
+      --fg: #e6edf3;
+      --muted: #9198a1;
+      --border: #3d444d;
+      --accent: #4493f8;
+      --warn-bg: #272115;
+      --warn-border: #9e6a03;
+      --code-bg: #151b23;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0 auto; padding: 2rem 1.25rem 4rem; max-width: 46rem;
+    background: var(--bg); color: var(--fg);
+    font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  }
+  h1 { font-size: 1.6rem; margin: 0 0 .25rem; }
+  h2 { font-size: 1.2rem; margin: 2rem 0 .5rem; padding-bottom: .3rem; border-bottom: 1px solid var(--border); }
+  .sub { color: var(--muted); margin: 0 0 1.5rem; }
+  a { color: var(--accent); }
+  code {
+    background: var(--code-bg); border: 1px solid var(--border);
+    border-radius: 5px; padding: .1em .35em; font-size: .875em;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  .note {
+    background: var(--warn-bg); border: 1px solid var(--warn-border);
+    border-left-width: 4px; border-radius: 6px; padding: .85rem 1rem; margin: 1.25rem 0;
+  }
+  .note p { margin: .4rem 0; }
+  .note p:first-child { margin-top: 0; }
+  .note p:last-child { margin-bottom: 0; }
+  .install {
+    display: flex; flex-direction: column; align-items: center; gap: .75rem;
+    border: 1px solid var(--border); border-radius: 10px;
+    padding: 1.75rem 1rem; margin: 1.5rem 0; background: var(--code-bg);
+  }
+  .install .hint { color: var(--muted); font-size: .875rem; text-align: center; }
+  .unsupported { color: var(--muted); text-align: center; }
+  table { border-collapse: collapse; width: 100%; display: block; overflow-x: auto; }
+  th, td { border: 1px solid var(--border); padding: .45rem .7rem; text-align: left; }
+  th { background: var(--code-bg); }
+  ol, ul { padding-left: 1.4rem; }
+  li { margin: .35rem 0; }
+  footer { margin-top: 3rem; padding-top: 1rem; border-top: 1px solid var(--border); color: var(--muted); font-size: .875rem; }
+</style>
+</head>
+<body>
+
+<h1>Прошивка WT32-ETH01 UART ⇄ Ethernet Bridge</h1>
+<p class="sub">Заливка прямо из браузера, без установки esptool и PlatformIO.</p>
+
+<div class="note">
+  <p><strong>Нужен Chrome или Edge на компьютере.</strong> Технология Web Serial
+  не поддерживается в Firefox и Safari, и не работает с телефона.</p>
+  <p>У WT32-ETH01 <strong>нет USB</strong>. Понадобится переходник USB-UART на 3,3 В
+  и перемычка GPIO0 → GND. Браузер избавляет от командной строки, но не от подключения проводами.</p>
+</div>
+
+<h2>1. Подключение</h2>
+
+<table>
+  <tr><th>Переходник USB-UART</th><th>WT32-ETH01</th></tr>
+  <tr><td>3V3</td><td>3V3 <em>(лучше подать 5 В на пин 5V от отдельного источника)</em></td></tr>
+  <tr><td>GND</td><td>GND</td></tr>
+  <tr><td>TX</td><td>RX0 (GPIO3)</td></tr>
+  <tr><td>RX</td><td>TX0 (GPIO1)</td></tr>
+  <tr><td>—</td><td><strong>GPIO0 → GND</strong> на время входа в загрузчик</td></tr>
+</table>
+
+<div class="note">
+  <p>LAN8720 заметно потребляет. От слабого USB-UART плата загрузится, но Ethernet
+  может не поднять линк — питайте от 5 В.</p>
+</div>
+
+<h2>2. Режим загрузчика</h2>
+
+<ol>
+  <li>Замкните <strong>GPIO0 на GND</strong>.</li>
+  <li>Подайте питание (или нажмите RESET), удерживая перемычку.</li>
+  <li>Нажмите «Подключить и прошить» ниже и выберите COM-порт переходника.</li>
+  <li>После окончания снимите перемычку и передёрните питание.</li>
+</ol>
+
+<h2>3. Прошивка</h2>
+
+<div class="install">
+  <esp-web-install-button manifest="firmware/manifest.json">
+    <button slot="activate">Подключить и прошить</button>
+    <span slot="unsupported" class="unsupported">
+      Этот браузер не поддерживает Web Serial. Откройте страницу в Chrome или Edge на компьютере.
+    </span>
+    <span slot="not-allowed" class="unsupported">
+      Страница должна открываться по HTTPS.
+    </span>
+  </esp-web-install-button>
+  <p class="hint">
+    Образ единый, пишется с адреса <code>0x0</code>: загрузчик, таблица разделов,
+    <code>ota_data_initial</code> и приложение.
+  </p>
+</div>
+
+<h2>4. После прошивки</h2>
+
+<ol>
+  <li>Подключите Ethernet-кабель и убедитесь, что светятся индикаторы на разъёме.</li>
+  <li>Откройте serial-монитор на <strong>115200</strong> — в логе будет строка <code>Got IP: ...</code>.</li>
+  <li>Откройте в браузере <code>http://&lt;IP&gt;/</code> или <code>http://wt32-uartbridge.local/</code>.</li>
+</ol>
+
+<div class="note">
+  <p><strong>Вход в web-интерфейс по умолчанию без пароля.</strong> Пока
+  аутентификация выключена, любой в сети может переконфигурировать каналы
+  управления. Перед полевым использованием включите её на странице
+  Firmware/About — пароль генерируется при первом запуске и печатается в лог.</p>
+</div>
+
+<div class="note">
+  <p><strong>Serial-лог замолкает</strong> после строки
+  <code>uart_manager initialized</code>, если включён канал AUX: он забирает
+  периферию UART0 у консоли. Это штатное поведение — дальше лог читается
+  по <code>GET /api/log</code> в web-интерфейсе.</p>
+</div>
+
+<footer>
+  <p>Прошивка не проходила полевых испытаний. Ограничения перечислены в разделе
+  «Что не проверено» — <a href="./">вернуться к описанию проекта</a>,
+  <a href="https://github.com/DDcode25/wt32_uart_bridge">исходный код на GitHub</a>.</p>
+</footer>
+
+<script type="module" src="https://unpkg.com/esp-web-tools@10/dist/web/install-button.js"></script>
+
+</body>
+</html>
