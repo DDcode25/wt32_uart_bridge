@@ -18,6 +18,17 @@ static const char *TAG = "netmgr";
 static esp_netif_t     *s_eth_netif = NULL;
 static esp_eth_handle_t s_eth_handle = NULL;
 static netmgr_status_t  s_status;
+static esp_timer_handle_t s_link_hint_timer = NULL;
+
+/* Отложенная подсказка: если через несколько секунд после старта линка
+ * так и нет, почти всегда виноват кабель, порт или питание PHY. */
+static void link_hint_cb(void *arg)
+{
+    (void)arg;
+    if (s_status.link_up) return;
+    ESP_LOGW(TAG, "still no link: PHY answers over MDIO, but autonegotiation did not complete");
+    ESP_LOGW(TAG, "check the cable, the switch port, and PHY power (5V rail is safer than 3V3)");
+}
 static netmgr_config_t  s_cfg;
 
 void network_manager_default_config(netmgr_config_t *out)
@@ -182,11 +193,18 @@ esp_err_t network_manager_init(const netmgr_config_t *cfg)
         return err;
     }
 
-    /* Событие ETHERNET_EVENT_CONNECTED прилетает асинхронно. Если к этому
-     * моменту его не было — линка нет, и без него DHCP не стартует. */
-    if (!s_status.link_up) {
-        ESP_LOGW(TAG, "no link yet: PHY answers over MDIO, but autonegotiation did not complete");
-        ESP_LOGW(TAG, "check the cable, the switch port, and PHY power (5V rail is safer than 3V3)");
+    /* Подсказку про кабель нельзя печатать здесь синхронно: событие
+     * ETHERNET_EVENT_CONNECTED приходит асинхронно через event loop и
+     * вполне может опоздать на пару миллисекунд. Поэтому проверяем
+     * отложенно — иначе предупреждение сработает даже при живом линке. */
+    if (!s_link_hint_timer) {
+        const esp_timer_create_args_t targs = {
+            .callback = link_hint_cb,
+            .name = "eth_link_hint",
+        };
+        if (esp_timer_create(&targs, &s_link_hint_timer) == ESP_OK) {
+            esp_timer_start_once(s_link_hint_timer, 3000000 /* 3 c */);
+        }
     }
 
     if (cfg->mdns_enabled) {
