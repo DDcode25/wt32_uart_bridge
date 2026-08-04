@@ -132,6 +132,30 @@ static esp_err_t status_get(httpd_req_t *req)
     return err;
 }
 
+/* Лог из кольцевого буфера. Актуален, когда UART0 отдан каналу данных
+ * и serial-консоль замолчала — тогда это единственный способ его прочитать. */
+static esp_err_t log_get(httpd_req_t *req)
+{
+    REQUIRE_AUTH(req);
+
+    const size_t cap = 4096 + 1;
+    char *buf = malloc(cap);
+    if (!buf) return httpd_resp_send_500(req);
+
+    httpd_resp_set_type(req, "text/plain; charset=utf-8");
+    if (!diagnostics_log_captured()) {
+        free(buf);
+        return httpd_resp_sendstr(req,
+            "Serial console is still active - the log goes to UART0, not here.\n"
+            "This buffer starts filling once a data channel takes over UART0.\n");
+    }
+
+    diagnostics_log_dump(buf, cap);
+    esp_err_t err = httpd_resp_sendstr(req, buf);
+    free(buf);
+    return err;
+}
+
 static esp_err_t config_get(httpd_req_t *req)
 {
     REQUIRE_AUTH(req);
@@ -289,6 +313,7 @@ esp_err_t web_server_start(app_config_t *cfg)
     static const httpd_uri_t uris[] = {
         { .uri = "/",             .method = HTTP_GET,  .handler = root_get },
         { .uri = "/api/status",   .method = HTTP_GET,  .handler = status_get },
+        { .uri = "/api/log",      .method = HTTP_GET,  .handler = log_get },
         { .uri = "/api/config",   .method = HTTP_GET,  .handler = config_get },
         { .uri = "/api/config",   .method = HTTP_POST, .handler = config_post },
         { .uri = "/api/profile",  .method = HTTP_POST, .handler = profile_post },

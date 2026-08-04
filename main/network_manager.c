@@ -168,12 +168,25 @@ esp_err_t network_manager_init(const netmgr_config_t *cfg)
     esp_netif_set_hostname(s_eth_netif, cfg->hostname);
     configure_ip(cfg);
 
+    /* esp_eth_start() блокируется до конца автосогласования PHY, а это
+     * autonego_timeout_ms (по умолчанию 4000 мс) при отсутствии линка.
+     * IDF в этом случае молчит: предупреждение "auto negotiation timeout"
+     * в esp_eth_phy_802_3.c печатается только если link_status уже UP,
+     * а он DOWN. Поэтому пишем сами, иначе пауза выглядит как зависание. */
+    ESP_LOGI(TAG, "starting Ethernet (PHY autonegotiation, up to 4 s without link)...");
     err = esp_eth_start(s_eth_handle);
     if (err != ESP_OK) {
         /* Плата должна нормально стартовать даже без кабеля/PHY —
          * логируем и продолжаем, web/UART остаются работоспособны. */
         ESP_LOGE(TAG, "esp_eth_start failed: %s (continuing without Ethernet)", esp_err_to_name(err));
         return err;
+    }
+
+    /* Событие ETHERNET_EVENT_CONNECTED прилетает асинхронно. Если к этому
+     * моменту его не было — линка нет, и без него DHCP не стартует. */
+    if (!s_status.link_up) {
+        ESP_LOGW(TAG, "no link yet: PHY answers over MDIO, but autonegotiation did not complete");
+        ESP_LOGW(TAG, "check the cable, the switch port, and PHY power (5V rail is safer than 3V3)");
     }
 
     if (cfg->mdns_enabled) {

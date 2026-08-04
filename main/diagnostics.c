@@ -1,6 +1,9 @@
 #include <string.h>
 #include <stdlib.h>
+#include <stdarg.h>
+#include <stdio.h>
 #include <arpa/inet.h>
+#include "freertos/FreeRTOS.h"
 #include "diagnostics.h"
 #include "uart_manager.h"
 #include "network_manager.h"
@@ -16,9 +19,79 @@
 static const char *TAG = "diag";
 static bool s_verbose = true;
 
+/* --- кольцевой буфер лога (см. diagnostics_capture_log в diagnostics.h) --- */
+#define DIAG_LOG_BUF_SIZE  4096
+#define DIAG_LOG_LINE_MAX  256
+
+static char   s_log_buf[DIAG_LOG_BUF_SIZE];
+static size_t s_log_head;     /* куда пишется следующий байт */
+static bool   s_log_wrapped;  /* буфер хотя бы раз обернулся */
+static bool   s_log_captured;
+static portMUX_TYPE s_log_mux = portMUX_INITIALIZER_UNLOCKED;
+
 esp_err_t diagnostics_init(void)
 {
     return ESP_OK;
+}
+
+/* Форматирование намеренно вынесено из критической секции: под спинлоком
+ * остаётся только копирование готовой строки. */
+static int diag_log_vprintf(const char *fmt, va_list ap)
+{
+    char line[DIAG_LOG_LINE_MAX];
+    int n = vsnprintf(line, sizeof(line), fmt, ap);
+    if (n <= 0) return n;
+
+    size_t len = ((size_t)n < sizeof(line)) ? (size_t)n : sizeof(line) - 1;
+
+    portENTER_CRITICAL_SAFE(&s_log_mux);
+    for (size_t i = 0; i < len; i++) {
+        s_log_buf[s_log_head] = line[i];
+        if (++s_log_head >= DIAG_LOG_BUF_SIZE) {
+            s_log_head = 0;
+            s_log_wrapped = true;
+        }
+    }
+    portEXIT_CRITICAL_SAFE(&s_log_mux);
+    return n;
+}
+
+void diagnostics_capture_log(void)
+{
+    if (s_log_captured) return;
+    s_log_captured = true;
+    esp_log_set_vprintf(diag_log_vprintf);
+}
+
+bool diagnostics_log_captured(void)
+{
+    return s_log_captured;
+}
+
+size_t diagnostics_log_dump(char *out, size_t out_size)
+{
+    if (!out || out_size == 0) return 0;
+    out[0] = '\0';
+    if (out_size == 1) return 0;
+
+    /* Копирование двумя memcpy, а не побайтовым циклом: критическая
+     * секция гасит прерывания, а канал на 420000 бод их ждать не любит. */
+    portENTER_CRITICAL_SAFE(&s_log_mux);
+    size_t avail = s_log_wrapped ? DIAG_LOG_BUF_SIZE : s_log_head;
+    size_t start = s_log_wrapped ? s_log_head : 0;
+    if (avail > out_size - 1) {
+        /* не влезает — отдаём свежий хвост, он важнее */
+        start = (start + (avail - (out_size - 1))) % DIAG_LOG_BUF_SIZE;
+        avail = out_size - 1;
+    }
+    size_t first = DIAG_LOG_BUF_SIZE - start;
+    if (first > avail) first = avail;
+    memcpy(out, s_log_buf + start, first);
+    if (avail > first) memcpy(out + first, s_log_buf, avail - first);
+    portEXIT_CRITICAL_SAFE(&s_log_mux);
+
+    out[avail] = '\0';
+    return avail;
 }
 
 void diagnostics_set_verbose(bool enabled)

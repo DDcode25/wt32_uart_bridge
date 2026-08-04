@@ -1,6 +1,7 @@
 #include <string.h>
 #include "uart_manager.h"
 #include "board_config.h"
+#include "diagnostics.h"   /* передача консоли каналу: diagnostics_capture_log() */
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/semphr.h"
@@ -167,6 +168,21 @@ esp_err_t uart_manager_apply_config(const uart_mgr_channel_cfg_t *cfg)
         ESP_LOGI(TAG, "channel %d (%s) disabled by config", cfg->channel_id, cfg->name);
         return ESP_OK;
     }
+
+    /* UART0 — это ещё и консоль ESP-IDF, а UART-периферий у ESP32 всего
+     * три и все заняты каналами. Как только канал забирает консольную
+     * периферию, лог обязан уйти из провода: uart_param_config() ниже
+     * сменит скорость (терминал на 115200 увидит мусор), а строки ESP_LOG
+     * физически подмешаются в поток канала и уедут по UDP клиенту. */
+#ifdef CONFIG_ESP_CONSOLE_UART_NUM
+    if (port == (uart_port_t)CONFIG_ESP_CONSOLE_UART_NUM && !diagnostics_log_captured()) {
+        ESP_LOGW(TAG, "UART%d is the ESP-IDF console; handing it over to channel '%s'",
+                 CONFIG_ESP_CONSOLE_UART_NUM, cfg->name);
+        ESP_LOGW(TAG, "serial console goes silent now - read the log at GET /api/log");
+        uart_wait_tx_idle_polling(port);  /* дать последним строкам уйти в провод */
+        diagnostics_capture_log();
+    }
+#endif
 
     uart_config_t uart_cfg = {
         .baud_rate = (int)cfg->baud_rate,
