@@ -16,6 +16,16 @@ header h1{font-size:16px;margin:0;font-weight:600}
 nav{display:flex;gap:2px;padding:8px 16px;background:var(--panel);border-bottom:1px solid var(--line);overflow-x:auto}
 nav button{background:none;border:none;color:var(--mut);padding:7px 12px;border-radius:6px;cursor:pointer;font-size:13px;white-space:nowrap}
 nav button.active{background:var(--acc);color:#fff}
+/* На телефоне девять вкладок в одну строку не влезают, и горизонтальная
+   прокрутка прячет последние четыре — на скриншоте их просто не видно.
+   Раскладываем сеткой 3x3: видны все, прокрутки нет. Кнопки крупнее,
+   чтобы попадать пальцем. */
+@media (max-width:640px){
+  nav{display:grid;grid-template-columns:repeat(3,1fr);gap:4px;padding:8px;overflow:visible}
+  nav button{padding:10px 4px;font-size:12px;line-height:1.25;white-space:normal;
+             min-height:42px;border:1px solid var(--line)}
+  nav button.active{border-color:var(--acc)}
+}
 main{padding:16px;max-width:900px;margin:0 auto}
 .page{display:none}.page.on{display:block}
 .card{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:14px;margin-bottom:14px}
