@@ -152,6 +152,9 @@ table.api code{background:#0d1015;border:1px solid var(--line);border-radius:4px
           <td>Перезагрузка устройства, тело не требуется</td></tr>
       <tr><td>POST</td><td>/api/factory</td>
           <td><code>{"confirm":"ERASE"}</code> — сброс к заводским настройкам</td></tr>
+      <tr><td>POST</td><td>/api/ota</td>
+          <td>Обновление прошивки. Тело — сырой <code>firmware.bin</code>,
+              не JSON и не multipart. Объединённый образ будет отвергнут</td></tr>
     </table>
   </div>
 </div>
@@ -170,6 +173,25 @@ table.api code{background:#0d1015;border:1px solid var(--line);border-radius:4px
     <div class="row"><label>Повторите</label><input type="password" id="pw2"></div>
     <div class="row"><label>Аутентификация включена</label><input type="checkbox" id="w_auth"></div>
     <button class="act" onclick="changePw()">Сменить пароль</button>
+  </div>
+  <div class="card"><h2>Обновление прошивки (OTA)</h2>
+    <div class="warnbox">Загружайте <b>firmware.bin</b> — только приложение.
+    Объединённый <b>firmware_merged.bin</b> не подойдёт: он содержит загрузчик
+    и таблицу разделов, и проверка образа его отвергнет.</div>
+    <div class="row">
+      <button class="act ghost" id="otabtn"
+        onclick="document.getElementById('otafile').click()">Выбрать файл и прошить</button>
+      <input type="file" id="otafile" style="display:none" accept=".bin" onchange="uploadOta(this)">
+    </div>
+    <div class="row"><span class="hint" style="margin-left:0">Образ пишется в неактивный
+    слот, поэтому текущая прошивка остаётся целой до самого конца. Плата
+    перезагрузится автоматически. Не отключайте питание во время заливки.</span></div>
+    <div id="otaprog" style="display:none;margin-top:10px">
+      <div style="background:#0d1015;border:1px solid var(--line);border-radius:5px;height:8px;overflow:hidden">
+        <div id="otabar" style="height:100%;width:0;background:var(--acc);transition:width .2s"></div>
+      </div>
+      <div class="hint" id="otatext" style="margin-top:6px"></div>
+    </div>
   </div>
   <div class="card"><h2>Обслуживание</h2>
     <div class="row">
@@ -333,6 +355,33 @@ async function changePw(){
   toast(r.ok?'Пароль изменён':'Ошибка',!r.ok);
   document.getElementById('pw1').value='';document.getElementById('pw2').value='';
 }
+/* XMLHttpRequest, а не fetch: у fetch нет прогресса отправки, а заливка
+   полумегабайта без индикатора выглядит как зависший интерфейс. */
+function uploadOta(inp){
+  const f=inp.files[0];inp.value='';
+  if(!f)return;
+  if(!confirm(`Прошить «${f.name}» (${f.size} Б)?\nПлата перезагрузится.`))return;
+  const prog=document.getElementById('otaprog'),bar=document.getElementById('otabar'),
+        txt=document.getElementById('otatext'),btn=document.getElementById('otabtn');
+  prog.style.display='block';btn.disabled=true;bar.style.width='0';
+  txt.textContent='передача…';
+  const x=new XMLHttpRequest();
+  x.open('POST','/api/ota');
+  x.upload.onprogress=e=>{if(!e.lengthComputable)return;
+    const p=Math.round(e.loaded/e.total*100);bar.style.width=p+'%';
+    txt.textContent=`отправлено ${p}% (${e.loaded} из ${e.total} Б)`;};
+  x.onload=()=>{btn.disabled=false;
+    if(x.status===200){bar.style.width='100%';
+      txt.textContent='образ принят и проверен, плата перезагружается…';
+      toast('Прошивка загружена, идёт перезагрузка');
+      setTimeout(()=>location.reload(),12000);
+    }else{txt.textContent=`ошибка ${x.status}: ${x.responseText||'без описания'}`;
+      toast('OTA не удалась',1);}};
+  x.onerror=()=>{btn.disabled=false;txt.textContent='обрыв связи при передаче';
+    toast('OTA не удалась',1);};
+  x.send(f);
+}
+
 function exportCfg(){
   collect();
   const b=new Blob([JSON.stringify(cfg,null,2)],{type:'application/json'});

@@ -27,5 +27,6 @@ idf_component_register(
         mdns
         esp_timer
         lwip
+        app_update    # esp_ota_ops.h для OTA через web
     EMBED_FILES "www/index.html"
 )

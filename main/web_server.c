@@ -1,5 +1,7 @@
 #include <string.h>
 #include <stdlib.h>
+#include <inttypes.h>
+#include "esp_ota_ops.h"
 #include "web_server.h"
 #include "diagnostics.h"
 #include "uart_manager.h"
@@ -15,6 +17,10 @@
 #include "freertos/task.h"
 
 static const char *TAG = "web";
+
+/* Размер куска при приёме OTA: компромисс между числом системных
+ * вызовов и куском кучи, который держим на время всей заливки. */
+#define OTA_CHUNK 4096
 static httpd_handle_t s_server = NULL;
 static app_config_t  *s_cfg = NULL;
 
@@ -267,6 +273,89 @@ static esp_err_t reboot_post(httpd_req_t *req)
     return ESP_OK;
 }
 
+/* Приём прошивки в неактивный OTA-слот.
+ *
+ * Принимает ТОЛЬКО приложение (firmware.bin), не объединённый образ:
+ * в слот идёт один app-раздел, а firmware_merged.bin содержит ещё
+ * загрузчик и таблицу разделов и будет отвергнут проверкой заголовка.
+ *
+ * Тело читается потоком: приложение под 600 КБ, целиком в куче ESP32
+ * его держать негде. Доступ подчинён общей настройке аутентификации,
+ * как у остальных эндпоинтов. */
+static esp_err_t ota_post(httpd_req_t *req)
+{
+    REQUIRE_AUTH(req);
+
+    const esp_partition_t *target = esp_ota_get_next_update_partition(NULL);
+    if (!target) {
+        ESP_LOGE(TAG, "OTA: no free slot (partition table without ota_0/ota_1?)");
+        return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "no OTA partition");
+    }
+    if (req->content_len <= 0 || (size_t)req->content_len > target->size) {
+        ESP_LOGW(TAG, "OTA: rejected size %d (slot %" PRIu32 ")",
+                 req->content_len, target->size);
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad image size");
+    }
+
+    ESP_LOGW(TAG, "OTA: receiving %d bytes into '%s'", req->content_len, target->label);
+
+    esp_ota_handle_t h = 0;
+    esp_err_t err = esp_ota_begin(target, req->content_len, &h);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "OTA: esp_ota_begin failed: %s", esp_err_to_name(err));
+        return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "ota_begin failed");
+    }
+
+    char *buf = malloc(OTA_CHUNK);
+    if (!buf) {
+        esp_ota_abort(h);
+        return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "out of memory");
+    }
+
+    int remaining = req->content_len;
+    while (remaining > 0) {
+        int got = httpd_req_recv(req, buf, remaining < OTA_CHUNK ? remaining : OTA_CHUNK);
+        if (got == HTTPD_SOCK_ERR_TIMEOUT) continue;   /* сокет жив, данные ещё идут */
+        if (got <= 0) {
+            ESP_LOGE(TAG, "OTA: receive failed with %d, %d bytes left", got, remaining);
+            free(buf);
+            esp_ota_abort(h);
+            return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "recv failed");
+        }
+        err = esp_ota_write(h, buf, got);
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "OTA: esp_ota_write failed: %s", esp_err_to_name(err));
+            free(buf);
+            esp_ota_abort(h);
+            return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "flash write failed");
+        }
+        remaining -= got;
+    }
+    free(buf);
+
+    /* Здесь проверяются magic и контрольная сумма образа: мусор,
+     * обрезанный или чужой файл до смены загрузочного раздела не дойдёт. */
+    err = esp_ota_end(h);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "OTA: image rejected: %s", esp_err_to_name(err));
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST,
+                                   err == ESP_ERR_OTA_VALIDATE_FAILED
+                                       ? "invalid image (send firmware.bin, not the merged one)"
+                                       : "ota_end failed");
+    }
+
+    err = esp_ota_set_boot_partition(target);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "OTA: set_boot_partition failed: %s", esp_err_to_name(err));
+        return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "set_boot failed");
+    }
+
+    ESP_LOGW(TAG, "OTA: '%s' is now the boot partition, rebooting", target->label);
+    send_json(req, "{\"ok\":true,\"rebooting\":true}");
+    xTaskCreate(reboot_task, "reboot", 2048, NULL, 5, NULL);
+    return ESP_OK;
+}
+
 static esp_err_t factory_post(httpd_req_t *req)
 {
     REQUIRE_AUTH(req);
@@ -320,6 +409,7 @@ esp_err_t web_server_start(app_config_t *cfg)
         { .uri = "/api/password", .method = HTTP_POST, .handler = password_post },
         { .uri = "/api/reboot",   .method = HTTP_POST, .handler = reboot_post },
         { .uri = "/api/factory",  .method = HTTP_POST, .handler = factory_post },
+        { .uri = "/api/ota",      .method = HTTP_POST, .handler = ota_post },
     };
     for (size_t i = 0; i < sizeof(uris) / sizeof(uris[0]); i++) {
         httpd_register_uri_handler(s_server, &uris[i]);
