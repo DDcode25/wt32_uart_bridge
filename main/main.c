@@ -144,6 +144,16 @@ void app_main(void)
         ESP_LOGW(TAG, "Web password is still the auto-generated one - please change it");
     }
 
+    /* Конфигурация из NVS могла быть записана прошивкой с другой
+     * раскладкой пинов или испорчена сохранением из устаревшей вкладки.
+     * Не чиним молча — но и не затираем чужие настройки: громко пишем,
+     * что именно не так, и продолжаем. */
+    char cfg_problem[160];
+    if (config_manager_validate(&s_config, cfg_problem, sizeof(cfg_problem)) != ESP_OK) {
+        ESP_LOGE(TAG, "!!! конфигурация каналов некорректна: %s", cfg_problem);
+        ESP_LOGE(TAG, "!!! исправьте назначение GPIO в web-интерфейсе");
+    }
+
     diagnostics_init();
     diagnostics_set_verbose(s_config.verbose_log);
     print_gpio_map();

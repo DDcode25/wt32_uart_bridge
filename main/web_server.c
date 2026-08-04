@@ -209,12 +209,35 @@ static esp_err_t config_post(httpd_req_t *req)
         return ESP_FAIL;
     }
 
-    esp_err_t err = config_manager_from_json(body, s_cfg);
+    /* Разбираем и проверяем на копии: from_json пишет поля по мере
+     * разбора, и при отказе на середине живая конфигурация осталась бы
+     * наполовину применённой. Копия в куче, а не на стеке — app_config_t
+     * заметно больше того, что можно занимать в задаче httpd. */
+    app_config_t *tmp = malloc(sizeof(*tmp));
+    if (!tmp) {
+        free(body);
+        return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "out of memory");
+    }
+    *tmp = *s_cfg;
+
+    esp_err_t err = config_manager_from_json(body, tmp);
     free(body);
     if (err != ESP_OK) {
+        free(tmp);
         httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "invalid json");
         return ESP_FAIL;
     }
+
+    char reason[160];
+    if (config_manager_validate(tmp, reason, sizeof(reason)) != ESP_OK) {
+        ESP_LOGW(TAG, "config rejected: %s", reason);
+        free(tmp);
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, reason);
+        return ESP_FAIL;
+    }
+
+    *s_cfg = *tmp;
+    free(tmp);
 
     if (config_manager_save(s_cfg) != ESP_OK) {
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "nvs save failed");

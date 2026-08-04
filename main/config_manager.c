@@ -151,6 +151,86 @@ esp_err_t config_manager_factory_reset(void)
     return err;
 }
 
+/* ---------------- валидация назначения GPIO ---------------- */
+
+static bool in_list(int pin, const int *list, size_t n)
+{
+    for (size_t i = 0; i < n; i++) if (list[i] == pin) return true;
+    return false;
+}
+
+esp_err_t config_manager_validate(const app_config_t *cfg, char *reason, size_t reason_len)
+{
+    static const int usable[]     = BOARD_USABLE_IO_GPIOS;
+    static const int input_only[] = BOARD_INPUT_ONLY_GPIOS;
+
+    /* owner[pin] — номер канала, уже занявшего вывод, либо -1. */
+    int8_t owner[40];
+    memset(owner, -1, sizeof(owner));
+
+    for (int i = 0; i < UART_MGR_NUM_CHANNELS; i++) {
+        const uart_mgr_channel_cfg_t *u = &cfg->uart[i];
+        if (!u->enabled) continue;   /* выключенный канал пины не держит */
+
+        /* Пин, направление, можно ли брать вывод «только на вход».
+         * Порядок важен: RX идёт первым и занимает вывод, поэтому
+         * исключение для однопроводного режима проверяется на TX. */
+        enum { P_RX = 0, P_TX = 1 };
+        const struct { int pin; const char *what; bool rx_ok; } pins[] = {
+            [P_RX] = { u->rx_gpio,       "RX",        true  },
+            [P_TX] = { u->tx_gpio,       "TX",        false },
+                     { u->rs485_de_gpio, "RS485 DE",  false },
+                     { u->rs485_re_gpio, "RS485 /RE", false },
+        };
+
+        for (size_t k = 0; k < sizeof(pins) / sizeof(pins[0]); k++) {
+            int pin = pins[k].pin;
+            if (pin < 0) continue;              /* -1 = не используется */
+            if (pin >= (int)sizeof(owner)) {
+                if (reason) snprintf(reason, reason_len,
+                    "%s: %s GPIO%d не существует", u->name, pins[k].what, pin);
+                return ESP_ERR_INVALID_ARG;
+            }
+
+            bool ok = in_list(pin, usable, sizeof(usable) / sizeof(usable[0]));
+            if (!ok && pins[k].rx_ok) {
+                ok = in_list(pin, input_only, sizeof(input_only) / sizeof(input_only[0]));
+            }
+            if (!ok) {
+                if (reason) snprintf(reason, reason_len,
+                    "%s: GPIO%d недоступен под %s (не выведен на плату, занят Ethernet/консолью "
+                    "или доступен только на вход)", u->name, pin, pins[k].what);
+                return ESP_ERR_INVALID_ARG;
+            }
+
+            /* Один провод на приём и передачу — легальный режим, но
+             * только для TX поверх RX того же канала. */
+            if (k == P_TX && owner[pin] == i &&
+                u->duplex == UART_DUPLEX_HALF_SINGLE_WIRE) {
+                continue;
+            }
+            if (owner[pin] >= 0) {
+                if (reason) snprintf(reason, reason_len,
+                    "GPIO%d занят дважды: %s (%s) и %s", pin, u->name, pins[k].what,
+                    cfg->uart[owner[pin]].name);
+                return ESP_ERR_INVALID_ARG;
+            }
+            owner[pin] = (int8_t)i;
+        }
+
+        /* TX==RX допустим только в однопроводном half-duplex. */
+        if (u->tx_gpio == u->rx_gpio && u->duplex != UART_DUPLEX_HALF_SINGLE_WIRE) {
+            if (reason) snprintf(reason, reason_len,
+                "%s: RX и TX на GPIO%d, но канал не в режиме однопроводного half-duplex",
+                u->name, u->tx_gpio);
+            return ESP_ERR_INVALID_ARG;
+        }
+    }
+
+    if (reason && reason_len) reason[0] = '\0';
+    return ESP_OK;
+}
+
 /* ---------------- profiles ---------------- */
 
 void config_manager_apply_profile(app_config_t *cfg, config_profile_t profile)

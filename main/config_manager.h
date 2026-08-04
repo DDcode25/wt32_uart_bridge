@@ -75,6 +75,17 @@ void      config_manager_generate_password(app_config_t *cfg, char *out_buf, siz
 char     *config_manager_to_json(const app_config_t *cfg);
 esp_err_t config_manager_from_json(const char *json, app_config_t *out);
 
+/* Проверка назначения GPIO перед применением конфигурации.
+ *
+ * from_json проверяет только диапазоны отдельных полей, поэтому через
+ * web можно было назначить каналу пин Ethernet (и потерять сеть),
+ * несуществующий на плате пин или один и тот же пин двум каналам —
+ * тогда сигналы обоих UART уходят GPIO-матрицей на один вывод.
+ *
+ * reason (может быть NULL) заполняется человекочитаемой причиной отказа,
+ * она уходит в HTTP-ответ, чтобы из интерфейса было видно, что не так. */
+esp_err_t config_manager_validate(const app_config_t *cfg, char *reason, size_t reason_len);
+
 #ifdef __cplusplus
 }
 #endif
