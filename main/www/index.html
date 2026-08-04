@@ -35,6 +35,13 @@ td:first-child{color:var(--mut);width:48%}
 .ok{color:var(--ok)}.err{color:var(--err)}.warn{color:var(--warn)}
 #toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:var(--panel);border:1px solid var(--line);padding:10px 18px;border-radius:6px;display:none;z-index:9}
 .warnbox{background:rgba(255,180,84,.1);border:1px solid var(--warn);color:var(--warn);padding:9px;border-radius:6px;font-size:12px;margin-bottom:12px}
+/* .hint вне .row: у существующего правила .row .hint выше специфичность, строки форм не затрагиваются */
+.hint{font-size:11px;color:var(--mut)}
+table.api td:first-child{width:58px;color:var(--mut)}
+table.api td:nth-child(2){width:150px;color:var(--fg)}
+table.api a{color:var(--acc);text-decoration:none}
+table.api a:hover{text-decoration:underline}
+table.api code{background:#0d1015;border:1px solid var(--line);border-radius:4px;padding:1px 5px;font-size:12px}
 </style>
 </head>
 <body>
@@ -122,6 +129,30 @@ td:first-child{color:var(--mut);width:48%}
     <pre id="logbox" style="background:#0d1015;border:1px solid var(--line);border-radius:6px;padding:10px;
       margin:10px 0 0;max-height:380px;overflow:auto;font-size:12px;line-height:1.45;
       white-space:pre-wrap;word-break:break-word;color:var(--mut)">нажмите «Обновить»</pre>
+  </div>
+  <div class="card"><h2>API устройства</h2>
+    <p class="hint" style="margin:0 0 10px">GET открывается по ссылке в новой вкладке.
+    POST вызывается этим интерфейсом или вручную, тело — JSON.</p>
+    <table class="api">
+      <tr><td>GET</td><td><a href="/" target="_blank">/</a></td>
+          <td>Этот web-интерфейс</td></tr>
+      <tr><td>GET</td><td><a href="/api/status" target="_blank">/api/status</a></td>
+          <td>Снимок состояния: система, Ethernet, каналы, счётчики протоколов</td></tr>
+      <tr><td>GET</td><td><a href="/api/log" target="_blank">/api/log</a></td>
+          <td>Лог устройства: закреплённое начало и свежие записи</td></tr>
+      <tr><td>GET</td><td><a href="/api/config" target="_blank">/api/config</a></td>
+          <td>Текущая конфигурация в JSON</td></tr>
+      <tr><td>POST</td><td>/api/config</td>
+          <td>Записать конфигурацию. Тело — тот же JSON, что отдаёт GET</td></tr>
+      <tr><td>POST</td><td>/api/profile</td>
+          <td><code>{"profile":1}</code> — профили A–D, значения 1…4</td></tr>
+      <tr><td>POST</td><td>/api/password</td>
+          <td><code>{"password":"…"}</code>, минимум 8 символов</td></tr>
+      <tr><td>POST</td><td>/api/reboot</td>
+          <td>Перезагрузка устройства, тело не требуется</td></tr>
+      <tr><td>POST</td><td>/api/factory</td>
+          <td><code>{"confirm":"ERASE"}</code> — сброс к заводским настройкам</td></tr>
+    </table>
   </div>
 </div>
 
