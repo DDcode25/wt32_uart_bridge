@@ -1,0 +1,74 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write   # нужно для публикации релиза по тегу
+
+jobs:
+  firmware:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # Платформа espressif32 и тулчейн ESP-IDF весят сотни мегабайт,
+      # без кеша каждая сборка тратила бы на их скачивание минуты.
+      - name: Cache PlatformIO
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.platformio
+            ~/.cache/pip
+          key: pio-${{ runner.os }}-${{ hashFiles('platformio.ini') }}
+          restore-keys: pio-${{ runner.os }}-
+
+      # esptool держим на 4.x: в 5.0 переименованы и подкоманда
+      # (merge_bin -> merge-bin), и флаги (--flash_mode -> --flash-mode).
+      - name: Install tools
+        run: pip install --upgrade platformio "esptool<5"
+
+      - name: Host protocol tests
+        run: |
+          gcc -Wall -O2 -o /tmp/test_protocols test/test_protocols_host.c
+          /tmp/test_protocols
+
+      - name: Build firmware
+        run: pio run -e wt32-eth01
+
+      # Единый образ с адреса 0x0. Смещение otadata здесь 0xf000, как в
+      # partitions.csv этого проекта, а не 0xe000 из стандартной таблицы.
+      - name: Merge into a single 0x0 image
+        run: |
+          esptool.py --chip esp32 merge_bin \
+            -o firmware_merged.bin \
+            --flash_mode dio --flash_freq 40m --flash_size 4MB \
+            0x1000  .pio/build/wt32-eth01/bootloader.bin \
+            0x8000  .pio/build/wt32-eth01/partitions.bin \
+            0xf000  .pio/build/wt32-eth01/ota_data_initial.bin \
+            0x20000 .pio/build/wt32-eth01/firmware.bin
+          sha256sum firmware_merged.bin
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: firmware-wt32-eth01
+          path: |
+            firmware_merged.bin
+            .pio/build/wt32-eth01/firmware.bin
+            .pio/build/wt32-eth01/firmware.elf
+
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: firmware_merged.bin
+          generate_release_notes: true
