@@ -2,6 +2,17 @@
 #include "protocol_crsf.h"
 #include "esp_timer.h"
 
+/* CRC покрывает TYPE+PAYLOAD и адрес не включает, поэтому принимать
+ * несколько адресов безопасно — проверка целостности не меняется. */
+static bool crsf_addr_known(uint8_t b)
+{
+    return b == CRSF_ADDR_FLIGHT_CONTROLLER ||
+           b == CRSF_ADDR_CRSF_TRANSMITTER  ||
+           b == CRSF_ADDR_RADIO_TRANSMITTER ||
+           b == CRSF_ADDR_RECEIVER          ||
+           b == CRSF_ADDR_BROADCAST;
+}
+
 uint8_t crsf_crc8_dvb_s2(const uint8_t *data, size_t len)
 {
     uint8_t crc = 0;
@@ -97,10 +108,11 @@ void crsf_parser_feed(crsf_parser_t *p, uint8_t channel_id, const uint8_t *data,
         uint8_t byte = data[i];
 
         if (p->buf_len == 0) {
-            if (byte != CRSF_SYNC_BYTE) {
+            if (!crsf_addr_known(byte)) {
                 p->state.sync_errors++;
                 continue; /* ищем начало кадра */
             }
+            p->state.last_addr = byte;
             p->buf[p->buf_len++] = byte;
             continue;
         }

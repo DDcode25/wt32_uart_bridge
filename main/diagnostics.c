@@ -287,6 +287,7 @@ char *diagnostics_status_json(void)
                 cJSON_AddNumberToObject(cr, "rx_frames_channels", p->crsf.state.rx_frames_channels);
                 cJSON_AddNumberToObject(cr, "crc_errors", p->crsf.state.crc_errors);
                 cJSON_AddNumberToObject(cr, "sync_errors", p->crsf.state.sync_errors);
+                cJSON_AddNumberToObject(cr, "last_addr", p->crsf.state.last_addr);
                 cJSON_AddNumberToObject(cr, "bad_length_frames", p->crsf.state.short_or_long_frame_errors);
                 cJSON_AddBoolToObject(cr, "failsafe", p->crsf.state.failsafe_active);
                 cJSON_AddNumberToObject(cr, "uplink_lq", p->crsf.state.uplink_link_quality);

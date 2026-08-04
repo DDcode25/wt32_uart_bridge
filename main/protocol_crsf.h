@@ -22,7 +22,18 @@
 extern "C" {
 #endif
 
-#define CRSF_SYNC_BYTE          0xC8
+/* Первый байт кадра — АДРЕС НАЗНАЧЕНИЯ, а не константа.
+ * 0xC8 идёт от приёмника к полётному контроллеру, но пульт, говорящий
+ * с внешним модулем, адресует кадры модулю — 0xEE. Парсер, принимавший
+ * только 0xC8, выбрасывал весь трафик связки «пульт → модуль». */
+#define CRSF_ADDR_FLIGHT_CONTROLLER  0xC8
+#define CRSF_ADDR_CRSF_TRANSMITTER   0xEE   /* внешний ВЧ-модуль */
+#define CRSF_ADDR_RADIO_TRANSMITTER  0xEA   /* пульт */
+#define CRSF_ADDR_RECEIVER           0xEC
+#define CRSF_ADDR_BROADCAST          0x00
+
+/* Адрес, который прошивка ставит в кадры, собираемые сама. */
+#define CRSF_SYNC_BYTE          CRSF_ADDR_FLIGHT_CONTROLLER
 #define CRSF_MAX_FRAME_LEN      64
 #define CRSF_NUM_CHANNELS       16
 
@@ -60,6 +71,7 @@ typedef struct {
     uint32_t crc_errors;
     uint32_t sync_errors;         /* байты, отброшенные в поиске SYNC */
     uint32_t short_or_long_frame_errors;
+    uint8_t  last_addr;           /* адрес назначения последнего принятого кадра */
 } crsf_state_t;
 
 typedef struct {
