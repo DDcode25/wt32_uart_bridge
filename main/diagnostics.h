@@ -11,8 +11,6 @@
 extern "C" {
 #endif
 
-#define FIRMWARE_VERSION "1.0.0-stage1"
-
 typedef struct {
     uint64_t uptime_ms;
     const char *reset_reason;
@@ -20,8 +18,29 @@ typedef struct {
     uint32_t min_free_heap;
 } sys_diag_t;
 
+/* Сведения о прошивке. Всё, кроме раздела, берётся из дескриптора
+ * приложения, который ESP-IDF записывает в образ при сборке — руками
+ * ничего поддерживать не нужно и разъехаться с реальностью не может.
+ *
+ * version — результат `git describe --always --tags --dirty`:
+ *   v1.2.0             ровно на теге, дерево чистое
+ *   v1.2.0-4-g9f3a1c2  через 4 коммита после тега
+ *   ...-dirty          в дереве были незакоммиченные правки
+ * Подробности — в README, раздел "Версионирование". */
+typedef struct {
+    const char *version;
+    const char *project;
+    const char *build_date;      /* "Aug  4 2026" */
+    const char *build_time;      /* "15:39:08"    */
+    const char *idf_version;
+    char        elf_sha256[17];  /* первые 8 байт в hex */
+    const char *partition;       /* ota_0 / ota_1 / factory */
+    uint32_t    partition_addr;
+} fw_info_t;
+
 esp_err_t diagnostics_init(void);
 void diagnostics_get_system(sys_diag_t *out);
+void diagnostics_get_firmware(fw_info_t *out);
 
 /* Полный снимок состояния в JSON (для /api/status). Возвращает
  * malloc'нутую строку — вызывающая сторона обязана free(). */

@@ -11,6 +11,7 @@
  */
 #include <string.h>
 #include <stdio.h>
+#include <inttypes.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_log.h"
@@ -33,9 +34,14 @@ static app_config_t s_config;
 
 static void print_banner(void)
 {
+    fw_info_t fw;
+    diagnostics_get_firmware(&fw);
     ESP_LOGI(TAG, "========================================");
     ESP_LOGI(TAG, " WT32-ETH01 UART <-> Ethernet Bridge");
-    ESP_LOGI(TAG, " Firmware %s / IDF %s", FIRMWARE_VERSION, esp_get_idf_version());
+    ESP_LOGI(TAG, " Firmware %s / IDF %s", fw.version, fw.idf_version);
+    ESP_LOGI(TAG, " Built    %s %s", fw.build_date, fw.build_time);
+    ESP_LOGI(TAG, " Running from '%s' at 0x%" PRIx32 ", elf %s",
+             fw.partition, fw.partition_addr, fw.elf_sha256);
     ESP_LOGI(TAG, "========================================");
 }
 

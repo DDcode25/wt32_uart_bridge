@@ -15,7 +15,12 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # fetch-depth: 0 обязателен: версия прошивки берётся из
+      # `git describe --tags`, а мелкий клон приходит без тегов и без
+      # истории, и в образ вместо v1.2.0 попал бы голый хеш коммита.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-python@v5
         with:
@@ -43,7 +48,9 @@ jobs:
           /tmp/test_protocols
 
       - name: Build firmware
-        run: pio run -e wt32-eth01
+        run: |
+          echo "версия для этой сборки: $(git describe --always --tags --dirty)"
+          pio run -e wt32-eth01
 
       # Единый образ с адреса 0x0. Смещение otadata здесь 0xf000, как в
       # partitions.csv этого проекта, а не 0xe000 из стандартной таблицы.

@@ -14,6 +14,8 @@
 #include "esp_timer.h"
 #include "esp_log.h"
 #include "esp_mac.h"
+#include "esp_app_desc.h"
+#include "esp_ota_ops.h"
 #include "cJSON.h"
 
 static const char *TAG = "diag";
@@ -49,6 +51,31 @@ _Static_assert(DIAG_LOG_PINNED_SIZE + sizeof(s_log_sep) + DIAG_LOG_RING_SIZE
 esp_err_t diagnostics_init(void)
 {
     return ESP_OK;
+}
+
+void diagnostics_get_firmware(fw_info_t *out)
+{
+    if (!out) return;
+    memset(out, 0, sizeof(*out));
+
+    const esp_app_desc_t *d = esp_app_get_description();
+    out->version     = d->version;
+    out->project     = d->project_name;
+    out->build_date  = d->date;
+    out->build_time  = d->time;
+    out->idf_version = d->idf_ver;
+
+    /* Восьми байт хватает, чтобы различить сборки глазами: полный хеш
+     * в 64 символа в таблице читать невозможно. */
+    for (int i = 0; i < 8; i++) {
+        snprintf(out->elf_sha256 + i * 2, 3, "%02x", d->app_elf_sha256[i]);
+    }
+
+    /* Раздел не из дескриптора: он говорит, откуда загрузились сейчас,
+     * а после OTA слоты чередуются. */
+    const esp_partition_t *p = esp_ota_get_running_partition();
+    out->partition      = p ? p->label : "?";
+    out->partition_addr = p ? p->address : 0;
 }
 
 /* Форматирование намеренно вынесено из критической секции: под спинлоком
@@ -185,8 +212,16 @@ char *diagnostics_status_json(void)
     cJSON_AddStringToObject(sys, "reset_reason", sd.reset_reason);
     cJSON_AddNumberToObject(sys, "free_heap", sd.free_heap);
     cJSON_AddNumberToObject(sys, "min_free_heap", sd.min_free_heap);
-    cJSON_AddStringToObject(sys, "firmware_version", FIRMWARE_VERSION);
-    cJSON_AddStringToObject(sys, "idf_version", esp_get_idf_version());
+    fw_info_t fw;
+    diagnostics_get_firmware(&fw);
+    cJSON_AddStringToObject(sys, "firmware_version", fw.version);
+    cJSON_AddStringToObject(sys, "project_name", fw.project);
+    cJSON_AddStringToObject(sys, "build_date", fw.build_date);
+    cJSON_AddStringToObject(sys, "build_time", fw.build_time);
+    cJSON_AddStringToObject(sys, "elf_sha256", fw.elf_sha256);
+    cJSON_AddStringToObject(sys, "partition", fw.partition);
+    cJSON_AddNumberToObject(sys, "partition_addr", fw.partition_addr);
+    cJSON_AddStringToObject(sys, "idf_version", fw.idf_version);
     cJSON_AddItemToObject(root, "system", sys);
 
     /* --- ethernet --- */

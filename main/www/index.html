@@ -419,8 +419,14 @@ async function poll(){
       row('Шлюз',s.ethernet.gateway)+row('Скорость',s.ethernet.link_speed_mbps+' Мбит/с')+
       row('Link up/down',s.ethernet.link_up_count+' / '+s.ethernet.link_down_count);
     document.getElementById('fwtab').innerHTML=
-      row('Версия прошивки',s.system.firmware_version)+row('ESP-IDF',s.system.idf_version)+
-      row('Схема конфигурации','v1');
+      row('Версия прошивки',`<b>${s.system.firmware_version}</b>`)+
+      row('Собрана',`${s.system.build_date} ${s.system.build_time}`)+
+      row('Проект',s.system.project_name)+
+      row('Загружена из раздела',
+          `${s.system.partition} @ 0x${(s.system.partition_addr>>>0).toString(16)}`)+
+      row('ELF SHA-256',s.system.elf_sha256)+
+      row('ESP-IDF',s.system.idf_version)+
+      row('Схема конфигурации','v'+(cfg?cfg.schema_version:'?'));
 
     document.getElementById('chsummary').innerHTML=s.channels.map(c=>
       `<div style="margin-bottom:8px"><b>${c.name}</b> — ${PROTOS[c.protocol]}, ${c.baud_rate} бод,
