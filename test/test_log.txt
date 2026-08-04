@@ -1,0 +1,16 @@
+== CRSF ==
+  PASS  CRC8 DVB-S2 check value 0xBC
+  PASS  frame header C8/24/0x16
+  PASS  self CRC verifies
+  PASS  16ch pack->unpack roundtrip
+  PASS  max value 2047 (11-bit) roundtrip
+== S.Bus ==
+  PASS  start 0x0F / end 0x00
+  PASS  16ch pack->unpack roundtrip
+  PASS  failsafe flag set
+== MAVLink framing ==
+  PASS  v1 HEARTBEAT total len = 17
+  PASS  v2 HEARTBEAT total len = 21
+  PASS  v2 signed frame adds 13 bytes
+
+ALL TESTS PASSED (0 failures)

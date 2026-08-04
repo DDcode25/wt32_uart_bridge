@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>WT32 UART-Ethernet Bridge</title>
+<style>
+:root{--bg:#12151a;--panel:#1b2029;--line:#2a3140;--fg:#e6e9ef;--mut:#8a94a6;--acc:#4a9eff;--ok:#3ecf8e;--err:#ff5c5c;--warn:#ffb454}
+*{box-sizing:border-box}
+body{margin:0;font:14px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--fg)}
+header{background:var(--panel);border-bottom:1px solid var(--line);padding:12px 16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+header h1{font-size:16px;margin:0;font-weight:600}
+#linkbadge{font-size:12px;padding:3px 8px;border-radius:10px;background:#333;color:var(--mut)}
+#linkbadge.up{background:rgba(62,207,142,.15);color:var(--ok)}
+#linkbadge.down{background:rgba(255,92,92,.15);color:var(--err)}
+nav{display:flex;gap:2px;padding:8px 16px;background:var(--panel);border-bottom:1px solid var(--line);overflow-x:auto}
+nav button{background:none;border:none;color:var(--mut);padding:7px 12px;border-radius:6px;cursor:pointer;font-size:13px;white-space:nowrap}
+nav button.active{background:var(--acc);color:#fff}
+main{padding:16px;max-width:900px;margin:0 auto}
+.page{display:none}.page.on{display:block}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:14px;margin-bottom:14px}
+.card h2{font-size:14px;margin:0 0 12px;font-weight:600;color:var(--acc)}
+.row{display:flex;gap:10px;align-items:center;margin-bottom:9px;flex-wrap:wrap}
+.row label{flex:0 0 190px;color:var(--mut);font-size:13px}
+.row .hint{flex-basis:100%;font-size:11px;color:var(--mut);margin-left:190px;margin-top:-4px}
+input,select{background:#0d1015;border:1px solid var(--line);color:var(--fg);padding:6px 9px;border-radius:5px;font-size:13px;min-width:120px}
+input[type=checkbox]{min-width:auto;width:16px;height:16px}
+button.act{background:var(--acc);color:#fff;border:none;padding:8px 16px;border-radius:6px;cursor:pointer;font-size:13px}
+button.danger{background:var(--err)}
+button.ghost{background:transparent;border:1px solid var(--line);color:var(--fg)}
+table{width:100%;border-collapse:collapse;font-size:13px}
+td{padding:5px 4px;border-bottom:1px solid var(--line)}
+td:first-child{color:var(--mut);width:48%}
+.ch{display:inline-block;width:76px;margin:2px;font-size:11px;background:#0d1015;padding:3px 5px;border-radius:4px}
+.ok{color:var(--ok)}.err{color:var(--err)}.warn{color:var(--warn)}
+#toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:var(--panel);border:1px solid var(--line);padding:10px 18px;border-radius:6px;display:none;z-index:9}
+.warnbox{background:rgba(255,180,84,.1);border:1px solid var(--warn);color:var(--warn);padding:9px;border-radius:6px;font-size:12px;margin-bottom:12px}
+</style>
+</head>
+<body>
+<header>
+  <h1>WT32-ETH01 UART⇄Ethernet Bridge</h1>
+  <span id="linkbadge">…</span>
+  <span style="margin-left:auto;color:var(--mut);font-size:12px" id="ipinfo"></span>
+</header>
+<nav>
+  <button data-p="dash" class="active">Dashboard</button>
+  <button data-p="net">Network</button>
+  <button data-p="u1">UART1</button>
+  <button data-p="u2">UART2</button>
+  <button data-p="u0">UART0/AUX</button>
+  <button data-p="proto">Protocol</button>
+  <button data-p="route">Routing</button>
+  <button data-p="diag">Diagnostics</button>
+  <button data-p="fw">Firmware/About</button>
+</nav>
+<main>
+
+<div class="page on" id="p-dash">
+  <div class="card"><h2>Система</h2><table id="systab"></table></div>
+  <div class="card"><h2>Ethernet</h2><table id="ethtab"></table></div>
+  <div class="card"><h2>Каналы</h2><div id="chsummary"></div></div>
+  <div class="card"><h2>Готовые профили</h2>
+    <div class="warnbox">Профиль перезаписывает настройки протоколов и портов всех каналов. GPIO и сетевые параметры не меняются.</div>
+    <div class="row">
+      <button class="act ghost" onclick="applyProfile(1)">A — Sine.Link/Centurion</button>
+      <button class="act ghost" onclick="applyProfile(2)">B — Mission Planner</button>
+      <button class="act ghost" onclick="applyProfile(3)">C — RadioMaster TX16S</button>
+      <button class="act ghost" onclick="applyProfile(4)">D — Универсальный мост</button>
+    </div>
+  </div>
+</div>
+
+<div class="page" id="p-net">
+  <div class="card"><h2>Сеть</h2>
+    <div class="warnbox">Изменение IP применяется после перезагрузки. Если адрес задан неверно, доступ к конфигуратору будет потерян — потребуется factory reset через serial.</div>
+    <div class="row"><label>Режим адреса</label>
+      <select id="n_dhcp"><option value="1">DHCP</option><option value="0">Статический IP</option></select></div>
+    <div class="row"><label>Hostname / mDNS</label><input id="n_host" maxlength="31"></div>
+    <div class="row"><span class="hint" style="margin-left:190px">Доступ по имени: hostname.local</span></div>
+    <div class="row"><label>IP-адрес</label><input id="n_ip"></div>
+    <div class="row"><label>Маска подсети</label><input id="n_mask"></div>
+    <div class="row"><label>Шлюз</label><input id="n_gw"></div>
+    <div class="row"><label>DNS</label><input id="n_dns"></div>
+    <div class="row"><label>mDNS включён</label><input type="checkbox" id="n_mdns"></div>
+  </div>
+  <button class="act" onclick="save()">Сохранить</button>
+</div>
+
+<div class="page" id="p-u1"><div id="form-1"></div><button class="act" onclick="save()">Сохранить</button></div>
+<div class="page" id="p-u2"><div id="form-2"></div><button class="act" onclick="save()">Сохранить</button></div>
+<div class="page" id="p-u0"><div id="form-0"></div><button class="act" onclick="save()">Сохранить</button></div>
+
+<div class="page" id="p-proto">
+  <div class="card"><h2>Протоколы по каналам</h2>
+    <div class="warnbox">RAW Transparent не изменяет байты вообще. Остальные режимы также передают поток без изменений — разбор используется только для статистики и отображения каналов.</div>
+    <div id="protoforms"></div>
+  </div>
+  <button class="act" onclick="save()">Сохранить</button>
+</div>
+
+<div class="page" id="p-route">
+  <div class="card"><h2>Направления передачи</h2>
+    <div class="warnbox">Можно сделать канал однонаправленным, отключив одно из направлений (например, только телеметрия наружу).</div>
+    <div id="routeforms"></div>
+  </div>
+  <button class="act" onclick="save()">Сохранить</button>
+</div>
+
+<div class="page" id="p-diag">
+  <div class="card"><h2>Диагностика каналов</h2><div id="diagdetail"></div></div>
+  <div class="card"><h2>Логирование</h2>
+    <div class="row"><label>Подробный лог</label><input type="checkbox" id="d_verbose"></div>
+    <div class="row"><span class="hint" style="margin-left:190px">Отключите после отладки: подробный лог влияет на задержку рабочих UART.</span></div>
+    <button class="act" onclick="save()">Сохранить</button>
+  </div>
+</div>
+
+<div class="page" id="p-fw">
+  <div class="card"><h2>О прошивке</h2><table id="fwtab"></table></div>
+  <div class="card"><h2>Конфигурация</h2>
+    <div class="row">
+      <button class="act ghost" onclick="exportCfg()">Экспорт JSON</button>
+      <button class="act ghost" onclick="document.getElementById('impfile').click()">Импорт JSON</button>
+      <input type="file" id="impfile" style="display:none" accept=".json" onchange="importCfg(this)">
+    </div>
+  </div>
+  <div class="card"><h2>Пароль web-интерфейса</h2>
+    <div class="row"><label>Новый пароль</label><input type="password" id="pw1" minlength="8"></div>
+    <div class="row"><label>Повторите</label><input type="password" id="pw2"></div>
+    <div class="row"><label>Аутентификация включена</label><input type="checkbox" id="w_auth"></div>
+    <button class="act" onclick="changePw()">Сменить пароль</button>
+  </div>
+  <div class="card"><h2>Обслуживание</h2>
+    <div class="row">
+      <button class="act ghost" onclick="reboot()">Перезагрузка</button>
+      <button class="act danger" onclick="factory()">Factory reset</button>
+    </div>
+    <div class="row"><span class="hint" style="margin-left:0">Factory reset требует ввода слова ERASE для подтверждения.</span></div>
+  </div>
+</div>
+
+</main>
+<div id="toast"></div>
+
+<script>
+const PROTOS=["RAW Transparent","CRSF","S.Bus","MAVLink","S.Port / SingleWire","RS-485 RAW","S.Bus→CRSF","CRSF→MAVLink","Custom"];
+const NETMODES=["Отключено","UDP","TCP server","TCP client","UDP + TCP server"];
+const PARITY=["None","Even","Odd"];const STOP=["1","1.5","2"];const DUPLEX=["Full duplex","Half / single-wire","RS-485 half-duplex"];
+let cfg=null;
+
+function toast(m,bad){const t=document.getElementById('toast');t.textContent=m;t.style.borderColor=bad?'var(--err)':'var(--ok)';t.style.display='block';setTimeout(()=>t.style.display='none',2600);}
+document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{
+  document.querySelectorAll('nav button').forEach(x=>x.classList.remove('active'));b.classList.add('active');
+  document.querySelectorAll('.page').forEach(p=>p.classList.remove('on'));
+  document.getElementById('p-'+b.dataset.p).classList.add('on');});
+
+function opts(arr,sel){return arr.map((v,i)=>`<option value="${i}"${i==sel?' selected':''}>${v}</option>`).join('');}
+
+function uartForm(c){
+  const id=c.channel_id;
+  return `<div class="card"><h2>${c.name} — параметры порта</h2>
+  <div class="row"><label>Имя канала</label><input id="c${id}_name" value="${c.name}" maxlength="23"></div>
+  <div class="row"><label>Включён</label><input type="checkbox" id="c${id}_en" ${c.enabled?'checked':''}></div>
+  <div class="row"><label>RX GPIO</label><input type="number" id="c${id}_rx" value="${c.rx_gpio}" min="0" max="39"></div>
+  <div class="row"><label>TX GPIO</label><input type="number" id="c${id}_tx" value="${c.tx_gpio}" min="0" max="33"></div>
+  <div class="row"><span class="hint">Не используйте 0,16,18,19,21,22,23,25,26,27 (Ethernet) и 1,3 (консоль). GPIO34-39 — только вход.</span></div>
+  <div class="row"><label>Скорость, бод</label><input type="number" id="c${id}_baud" value="${c.baud_rate}" min="9600" max="5000000"></div>
+  <div class="row"><label>Бит данных</label><select id="c${id}_db">${[5,6,7,8].map((v,i)=>`<option value="${i}"${i==c.data_bits?' selected':''}>${v}</option>`).join('')}</select></div>
+  <div class="row"><label>Чётность</label><select id="c${id}_par">${opts(PARITY,c.parity)}</select></div>
+  <div class="row"><label>Стоп-биты</label><select id="c${id}_sb">${opts(STOP,c.stop_bits)}</select></div>
+  <div class="row"><label>Инверсия RX</label><input type="checkbox" id="c${id}_irx" ${c.invert_rx?'checked':''}></div>
+  <div class="row"><label>Инверсия TX</label><input type="checkbox" id="c${id}_itx" ${c.invert_tx?'checked':''}></div>
+  <div class="row"><span class="hint">S.Bus обычно требует инверсии: 100000 бод, 8E2, инверсия RX и TX.</span></div>
+  <div class="row"><label>Дуплекс</label><select id="c${id}_dup">${opts(DUPLEX,c.duplex)}</select></div>
+  <div class="row"><label>RS-485 DE GPIO</label><input type="number" id="c${id}_de" value="${c.rs485_de_gpio}" min="-1" max="33"></div>
+  <div class="row"><label>RS-485 /RE GPIO</label><input type="number" id="c${id}_re" value="${c.rs485_re_gpio}" min="-1" max="33"></div>
+  <div class="row"><span class="hint">-1 = не используется. Не подключайте RS-485 напрямую к GPIO, нужен трансивер.</span></div>
+  <div class="row"><label>RX watchdog, мс</label><input type="number" id="c${id}_wd" value="${c.rx_watchdog_timeout_ms}" min="0" max="60000"></div>
+  <div class="row"><span class="hint">0 = отключён. При отсутствии данных дольше таймаута канал помечается как потерянный.</span></div>
+  </div>
+  <div class="card"><h2>${c.name} — сеть</h2>
+  <div class="row"><label>Сетевой режим</label><select id="c${id}_mode">${opts(NETMODES,c.net_mode)}</select></div>
+  <div class="row"><label>UDP listen порт</label><input type="number" id="c${id}_ulp" value="${c.udp_listen_port}" min="0" max="65535"></div>
+  <div class="row"><label>TCP server порт</label><input type="number" id="c${id}_tsp" value="${c.tcp_server_port}" min="0" max="65535"></div>
+  <div class="row"><label>Макс. TCP клиентов</label><input type="number" id="c${id}_mtc" value="${c.max_tcp_clients}" min="1" max="4"></div>
+  <div class="row"><label>Принимать с любого IP</label><input type="checkbox" id="c${id}_any" ${c.allow_any_source?'checked':''}></div>
+  <div class="row"><span class="hint">Отключите, чтобы принимать управляющий трафик только с доверенного адреса.</span></div>
+  <h2 style="margin-top:14px">UDP destinations (fan-out)</h2>
+  ${c.udp_destinations.map((d,i)=>`<div class="row"><label>Адресат ${i+1}</label>
+    <input id="c${id}_d${i}_ip" value="${d.ip}" style="width:130px">
+    <input type="number" id="c${id}_d${i}_p" value="${d.port}" style="width:90px" min="0" max="65535">
+    <input type="checkbox" id="c${id}_d${i}_e" ${d.enabled?'checked':''}></div>`).join('')}
+  <div class="row"><span class="hint">Если ни один адресат не включён, ответы уходят на адрес последнего входящего пакета.</span></div>
+  </div>`;
+}
+
+function render(){
+  [0,1,2].forEach(i=>{
+    const c=cfg.channels.find(x=>x.channel_id==i);
+    document.getElementById('form-'+i).innerHTML=uartForm(c);
+  });
+  const n=cfg.network;
+  document.getElementById('n_dhcp').value=n.use_dhcp?1:0;
+  document.getElementById('n_host').value=n.hostname;
+  document.getElementById('n_ip').value=n.static_ip;
+  document.getElementById('n_mask').value=n.static_netmask;
+  document.getElementById('n_gw').value=n.static_gateway;
+  document.getElementById('n_dns').value=n.static_dns;
+  document.getElementById('n_mdns').checked=n.mdns_enabled;
+  document.getElementById('d_verbose').checked=cfg.verbose_log;
+  document.getElementById('w_auth').checked=cfg.web_auth_enabled;
+
+  document.getElementById('protoforms').innerHTML=cfg.channels.map(c=>
+    `<div class="row"><label>${c.name}</label><select id="c${c.channel_id}_proto">${opts(PROTOS,c.protocol)}</select></div>`).join('');
+  document.getElementById('routeforms').innerHTML=cfg.channels.map(c=>
+    `<div class="row"><label>${c.name}</label>
+     <label style="flex:0 0 auto"><input type="checkbox" id="c${c.channel_id}_u2n" ${c.uart_to_net?'checked':''}> UART→сеть</label>
+     <label style="flex:0 0 auto"><input type="checkbox" id="c${c.channel_id}_n2u" ${c.net_to_uart?'checked':''}> сеть→UART</label></div>`).join('');
+}
+
+function collect(){
+  const g=id=>document.getElementById(id);
+  cfg.network.use_dhcp=g('n_dhcp').value=='1';
+  cfg.network.hostname=g('n_host').value;
+  cfg.network.static_ip=g('n_ip').value;
+  cfg.network.static_netmask=g('n_mask').value;
+  cfg.network.static_gateway=g('n_gw').value;
+  cfg.network.static_dns=g('n_dns').value;
+  cfg.network.mdns_enabled=g('n_mdns').checked;
+  cfg.verbose_log=g('d_verbose').checked;
+  cfg.web_auth_enabled=g('w_auth').checked;
+  cfg.channels.forEach(c=>{
+    const i=c.channel_id;
+    c.name=g('c'+i+'_name').value;
+    c.enabled=g('c'+i+'_en').checked;
+    c.rx_gpio=+g('c'+i+'_rx').value; c.tx_gpio=+g('c'+i+'_tx').value;
+    c.baud_rate=+g('c'+i+'_baud').value;
+    c.data_bits=+g('c'+i+'_db').value; c.parity=+g('c'+i+'_par').value; c.stop_bits=+g('c'+i+'_sb').value;
+    c.invert_rx=g('c'+i+'_irx').checked; c.invert_tx=g('c'+i+'_itx').checked;
+    c.duplex=+g('c'+i+'_dup').value;
+    c.rs485_de_gpio=+g('c'+i+'_de').value; c.rs485_re_gpio=+g('c'+i+'_re').value;
+    c.rx_watchdog_timeout_ms=+g('c'+i+'_wd').value;
+    c.net_mode=+g('c'+i+'_mode').value;
+    c.udp_listen_port=+g('c'+i+'_ulp').value; c.tcp_server_port=+g('c'+i+'_tsp').value;
+    c.max_tcp_clients=+g('c'+i+'_mtc').value; c.allow_any_source=g('c'+i+'_any').checked;
+    c.udp_destinations.forEach((d,k)=>{d.ip=g('c'+i+'_d'+k+'_ip').value;d.port=+g('c'+i+'_d'+k+'_p').value;d.enabled=g('c'+i+'_d'+k+'_e').checked;});
+    if(g('c'+i+'_proto'))c.protocol=+g('c'+i+'_proto').value;
+    if(g('c'+i+'_u2n')){c.uart_to_net=g('c'+i+'_u2n').checked;c.net_to_uart=g('c'+i+'_n2u').checked;}
+  });
+}
+
+async function loadCfg(){
+  const r=await fetch('/api/config');
+  if(!r.ok){toast('Ошибка загрузки конфигурации',1);return;}
+  cfg=await r.json();render();
+}
+async function save(){
+  collect();
+  const r=await fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(cfg)});
+  toast(r.ok?'Сохранено. Часть параметров применится после перезагрузки.':'Ошибка сохранения',!r.ok);
+}
+async function applyProfile(p){
+  if(!confirm('Применить профиль? Текущие настройки протоколов и портов будут перезаписаны.'))return;
+  const r=await fetch('/api/profile',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({profile:p})});
+  if(r.ok){toast('Профиль применён');loadCfg();}else toast('Ошибка',1);
+}
+async function reboot(){if(confirm('Перезагрузить устройство?'))
+  {await fetch('/api/reboot',{method:'POST'});toast('Перезагрузка…');}}
+async function factory(){
+  const v=prompt('Это сотрёт ВСЕ настройки. Введите ERASE для подтверждения:');
+  if(v!=='ERASE'){toast('Отменено');return;}
+  const r=await fetch('/api/factory',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({confirm:'ERASE'})});
+  toast(r.ok?'Factory reset выполнен, перезагрузка…':'Ошибка',!r.ok);
+}
+async function changePw(){
+  const a=document.getElementById('pw1').value,b=document.getElementById('pw2').value;
+  if(a.length<8){toast('Минимум 8 символов',1);return;}
+  if(a!==b){toast('Пароли не совпадают',1);return;}
+  const r=await fetch('/api/password',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password:a})});
+  toast(r.ok?'Пароль изменён':'Ошибка',!r.ok);
+  document.getElementById('pw1').value='';document.getElementById('pw2').value='';
+}
+function exportCfg(){
+  collect();
+  const b=new Blob([JSON.stringify(cfg,null,2)],{type:'application/json'});
+  const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='wt32-bridge-config.json';a.click();
+}
+function importCfg(inp){
+  const f=inp.files[0];if(!f)return;
+  const rd=new FileReader();
+  rd.onload=async()=>{
+    try{const j=JSON.parse(rd.result);
+      const r=await fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(j)});
+      if(r.ok){toast('Импортировано');loadCfg();}else toast('Ошибка импорта',1);
+    }catch(e){toast('Некорректный JSON',1);}
+  };rd.readAsText(f);
+}
+
+function row(k,v){return `<tr><td>${k}</td><td>${v}</td></tr>`;}
+function fmtUp(ms){const s=Math.floor(ms/1000);return `${Math.floor(s/86400)}д ${Math.floor(s%86400/3600)}ч ${Math.floor(s%3600/60)}м ${s%60}с`;}
+
+async function poll(){
+  try{
+    const r=await fetch('/api/status');if(!r.ok)return;
+    const s=await r.json();
+    const badge=document.getElementById('linkbadge');
+    badge.textContent=s.ethernet.link_up?`Link ${s.ethernet.link_speed_mbps}M ${s.ethernet.full_duplex?'FD':'HD'}`:'Link DOWN';
+    badge.className=s.ethernet.link_up?'up':'down';
+    document.getElementById('ipinfo').textContent=s.ethernet.got_ip?s.ethernet.ip:'нет IP';
+
+    document.getElementById('systab').innerHTML=
+      row('Uptime',fmtUp(s.system.uptime_ms))+row('Причина перезагрузки',s.system.reset_reason)+
+      row('Свободная память',s.system.free_heap+' Б')+row('Минимум за сессию',s.system.min_free_heap+' Б');
+    document.getElementById('ethtab').innerHTML=
+      row('Link',s.ethernet.link_up?'<span class="ok">UP</span>':'<span class="err">DOWN</span>')+
+      row('MAC',s.ethernet.mac)+row('IP',s.ethernet.ip)+row('Маска',s.ethernet.netmask)+
+      row('Шлюз',s.ethernet.gateway)+row('Скорость',s.ethernet.link_speed_mbps+' Мбит/с')+
+      row('Link up/down',s.ethernet.link_up_count+' / '+s.ethernet.link_down_count);
+    document.getElementById('fwtab').innerHTML=
+      row('Версия прошивки',s.system.firmware_version)+row('ESP-IDF',s.system.idf_version)+
+      row('Схема конфигурации','v1');
+
+    document.getElementById('chsummary').innerHTML=s.channels.map(c=>
+      `<div style="margin-bottom:8px"><b>${c.name}</b> — ${PROTOS[c.protocol]}, ${c.baud_rate} бод,
+       GPIO rx${c.rx_gpio}/tx${c.tx_gpio} ${c.enabled?(c.alive?'<span class="ok">активен</span>':'<span class="warn">нет данных</span>'):'<span class="err">выключен</span>'}<br>
+       <span style="color:var(--mut);font-size:12px">RX ${c.rx_bytes} Б / TX ${c.tx_bytes} Б · UDP ${c.udp_rx_packets}/${c.udp_tx_packets} · TCP клиентов ${c.tcp_clients}</span></div>`).join('');
+
+    document.getElementById('diagdetail').innerHTML=s.channels.map(c=>{
+      let t=`<div class="card" style="background:#0d1015"><h2>${c.name}</h2><table>`+
+        row('Протокол',PROTOS[c.protocol])+row('RX / TX байт',c.rx_bytes+' / '+c.tx_bytes)+
+        row('UART overruns',c.rx_overruns>0?`<span class="err">${c.rx_overruns}</span>`:'0')+
+        row('UDP пакетов rx/tx',c.udp_rx_packets+' / '+c.udp_tx_packets)+
+        row('UDP отброшено',c.udp_rx_dropped)+
+        row('TCP байт rx/tx',c.tcp_rx_bytes+' / '+c.tcp_tx_bytes)+
+        row('TCP клиентов',c.tcp_clients)+
+        row('Последний приём UART',c.last_rx_time_ms?c.last_rx_time_ms+' мс':'—')+
+        row('Watchdog',c.alive?'<span class="ok">OK</span>':'<span class="err">таймаут</span>');
+      if(c.crsf){t+=row('CRSF кадров',c.crsf.rx_frames_total)+row('CRSF кадров каналов',c.crsf.rx_frames_channels)+
+        row('CRC ошибок',c.crsf.crc_errors>0?`<span class="err">${c.crsf.crc_errors}</span>`:'0')+
+        row('Ошибок синхронизации',c.crsf.sync_errors)+row('Некорректная длина',c.crsf.bad_length_frames)+
+        row('Failsafe',c.crsf.failsafe?'<span class="err">ДА</span>':'нет')+
+        row('Uplink LQ / RSSI / SNR',c.crsf.uplink_lq+' / '+c.crsf.uplink_rssi+' / '+c.crsf.uplink_snr);}
+      if(c.sbus){t+=row('S.Bus кадров',c.sbus.rx_frames_total)+row('Ошибок кадра',c.sbus.frame_errors)+
+        row('Failsafe',c.sbus.failsafe?'<span class="err">ДА</span>':'нет')+
+        row('Frame lost',c.sbus.frame_lost?'<span class="warn">ДА</span>':'нет')+
+        row('CH17 / CH18',(c.sbus.ch17?'1':'0')+' / '+(c.sbus.ch18?'1':'0'));}
+      if(c.mavlink){t+=row('MAVLink v1 / v2',c.mavlink.rx_frames_v1+' / '+c.mavlink.rx_frames_v2)+
+        row('Ошибок кадра',c.mavlink.frame_errors)+row('Heartbeat',c.mavlink.heartbeats)+
+        row('sysid / compid',c.mavlink.last_sysid+' / '+c.mavlink.last_compid)+
+        row('Последний msgid',c.mavlink.last_msgid);}
+      if(c.raw){t+=row('RAW байт всего',c.raw.bytes_total);}
+      t+='</table>';
+      const chs=c.crsf?c.crsf.channels:(c.sbus?c.sbus.channels:null);
+      if(chs)t+='<div style="margin-top:8px">'+chs.map((v,i)=>`<span class="ch">CH${i+1}: ${v}</span>`).join('')+'</div>';
+      return t+'</div>';
+    }).join('');
+  }catch(e){}
+}
+loadCfg();poll();setInterval(poll,1000);
+</script>
+</body>
+</html>

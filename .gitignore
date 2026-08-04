@@ -1,0 +1,11 @@
+build/
+.pio/
+# PlatformIO генерирует sdkconfig.<env>, idf.py — просто sdkconfig.
+# Оба собираются из sdkconfig.defaults, который и хранится в репозитории.
+sdkconfig
+sdkconfig.*
+!sdkconfig.defaults
+managed_components/
+dependencies.lock
+test/test
+*.o

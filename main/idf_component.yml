@@ -1,0 +1,6 @@
+## Управление зависимостями ESP-IDF Component Manager.
+## mDNS вынесен из ядра IDF в отдельный компонент начиная с IDF 5.x.
+dependencies:
+  espressif/mdns: "^1.2.0"
+  idf:
+    version: ">=5.1"

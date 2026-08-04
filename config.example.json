@@ -1,0 +1,93 @@
+{
+  "schema_version": 1,
+  "network": {
+    "use_dhcp": false,
+    "hostname": "wt32-uartbridge",
+    "static_ip": "192.168.1.50",
+    "static_netmask": "255.255.255.0",
+    "static_gateway": "192.168.1.1",
+    "static_dns": "8.8.8.8",
+    "mdns_enabled": true
+  },
+  "channels": [
+    {
+      "channel_id": 0,
+      "name": "UART0_AUX",
+      "rx_gpio": 4, "tx_gpio": 13,
+      "baud_rate": 57600,
+      "data_bits": 3, "parity": 0, "stop_bits": 0,
+      "invert_rx": false, "invert_tx": false,
+      "duplex": 0,
+      "rs485_de_gpio": -1, "rs485_re_gpio": -1,
+      "protocol": 0,
+      "rx_watchdog_timeout_ms": 0,
+      "enabled": true,
+      "net_mode": 1,
+      "udp_listen_port": 14560,
+      "tcp_server_port": 0,
+      "max_tcp_clients": 4,
+      "allow_any_source": true,
+      "udp_destinations": [
+        { "ip": "0.0.0.0", "port": 0, "enabled": false },
+        { "ip": "0.0.0.0", "port": 0, "enabled": false },
+        { "ip": "0.0.0.0", "port": 0, "enabled": false },
+        { "ip": "0.0.0.0", "port": 0, "enabled": false }
+      ],
+      "uart_to_net": true, "net_to_uart": true
+    },
+    {
+      "channel_id": 1,
+      "name": "UART1_CRSF",
+      "rx_gpio": 33, "tx_gpio": 32,
+      "baud_rate": 420000,
+      "data_bits": 3, "parity": 0, "stop_bits": 0,
+      "invert_rx": false, "invert_tx": false,
+      "duplex": 0,
+      "rs485_de_gpio": -1, "rs485_re_gpio": -1,
+      "protocol": 1,
+      "rx_watchdog_timeout_ms": 500,
+      "enabled": true,
+      "net_mode": 1,
+      "udp_listen_port": 14555,
+      "tcp_server_port": 0,
+      "max_tcp_clients": 4,
+      "allow_any_source": true,
+      "udp_destinations": [
+        { "ip": "192.168.1.100", "port": 14555, "enabled": true },
+        { "ip": "0.0.0.0", "port": 0, "enabled": false },
+        { "ip": "0.0.0.0", "port": 0, "enabled": false },
+        { "ip": "0.0.0.0", "port": 0, "enabled": false }
+      ],
+      "uart_to_net": true, "net_to_uart": true
+    },
+    {
+      "channel_id": 2,
+      "name": "UART2_MAVLINK",
+      "rx_gpio": 17, "tx_gpio": 14,
+      "baud_rate": 115200,
+      "data_bits": 3, "parity": 0, "stop_bits": 0,
+      "invert_rx": false, "invert_tx": false,
+      "duplex": 0,
+      "rs485_de_gpio": -1, "rs485_re_gpio": -1,
+      "protocol": 3,
+      "rx_watchdog_timeout_ms": 5000,
+      "enabled": true,
+      "net_mode": 4,
+      "udp_listen_port": 14550,
+      "tcp_server_port": 1310,
+      "max_tcp_clients": 4,
+      "allow_any_source": true,
+      "udp_destinations": [
+        { "ip": "192.168.1.100", "port": 14550, "enabled": true },
+        { "ip": "192.168.1.101", "port": 14550, "enabled": true },
+        { "ip": "10.8.0.2", "port": 14550, "enabled": true },
+        { "ip": "0.0.0.0", "port": 0, "enabled": false }
+      ],
+      "uart_to_net": true, "net_to_uart": true
+    }
+  ],
+  "web_auth_enabled": true,
+  "web_user": "admin",
+  "verbose_log": false,
+  "active_profile": 1
+}
