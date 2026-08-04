@@ -19,15 +19,32 @@
 static const char *TAG = "diag";
 static bool s_verbose = true;
 
-/* --- кольцевой буфер лога (см. diagnostics_capture_log в diagnostics.h) --- */
-#define DIAG_LOG_BUF_SIZE  4096
-#define DIAG_LOG_LINE_MAX  256
+/* --- буфер лога (см. diagnostics_capture_log в diagnostics.h) ---
+ *
+ * Два раздела, а не одно кольцо. Чистое кольцо на 4 КБ вытесняло само
+ * начало лога за считанные минуты, и в /api/log оставалась одна лишь
+ * периодика супервизора — ни старта каналов, ни момента передачи UART0,
+ * ни получения адреса. Поэтому начало закрепляется навсегда, а по кругу
+ * крутится только хвост со свежими записями. */
+#define DIAG_LOG_PINNED_SIZE  2048
+#define DIAG_LOG_RING_SIZE    4096
+#define DIAG_LOG_LINE_MAX     256
 
-static char   s_log_buf[DIAG_LOG_BUF_SIZE];
-static size_t s_log_head;     /* куда пишется следующий байт */
-static bool   s_log_wrapped;  /* буфер хотя бы раз обернулся */
+static const char s_log_sep[] = "\n---- earlier lines dropped, recent log follows ----\n";
+
+static char   s_log_pinned[DIAG_LOG_PINNED_SIZE];
+static size_t s_log_pinned_len;
+
+static char   s_log_ring[DIAG_LOG_RING_SIZE];
+static size_t s_log_ring_head;     /* куда пишется следующий байт */
+static bool   s_log_ring_wrapped;  /* кольцо хотя бы раз обернулось */
+
 static bool   s_log_captured;
 static portMUX_TYPE s_log_mux = portMUX_INITIALIZER_UNLOCKED;
+
+_Static_assert(DIAG_LOG_PINNED_SIZE + sizeof(s_log_sep) + DIAG_LOG_RING_SIZE
+               <= DIAGNOSTICS_LOG_DUMP_MAX,
+               "DIAGNOSTICS_LOG_DUMP_MAX мал для закреплённой части, разделителя и кольца");
 
 esp_err_t diagnostics_init(void)
 {
@@ -45,11 +62,23 @@ static int diag_log_vprintf(const char *fmt, va_list ap)
     size_t len = ((size_t)n < sizeof(line)) ? (size_t)n : sizeof(line) - 1;
 
     portENTER_CRITICAL_SAFE(&s_log_mux);
-    for (size_t i = 0; i < len; i++) {
-        s_log_buf[s_log_head] = line[i];
-        if (++s_log_head >= DIAG_LOG_BUF_SIZE) {
-            s_log_head = 0;
-            s_log_wrapped = true;
+    size_t i = 0;
+
+    /* Пока закреплённая часть не заполнена — пишем туда. */
+    if (s_log_pinned_len < DIAG_LOG_PINNED_SIZE) {
+        size_t room = DIAG_LOG_PINNED_SIZE - s_log_pinned_len;
+        if (room > len) room = len;
+        memcpy(s_log_pinned + s_log_pinned_len, line, room);
+        s_log_pinned_len += room;
+        i = room;
+    }
+
+    /* Остаток строки и всё последующее — в кольцо. */
+    for (; i < len; i++) {
+        s_log_ring[s_log_ring_head] = line[i];
+        if (++s_log_ring_head >= DIAG_LOG_RING_SIZE) {
+            s_log_ring_head = 0;
+            s_log_ring_wrapped = true;
         }
     }
     portEXIT_CRITICAL_SAFE(&s_log_mux);
@@ -72,26 +101,43 @@ size_t diagnostics_log_dump(char *out, size_t out_size)
 {
     if (!out || out_size == 0) return 0;
     out[0] = '\0';
-    if (out_size == 1) return 0;
+    if (out_size < 2) return 0;
 
-    /* Копирование двумя memcpy, а не побайтовым циклом: критическая
+    const size_t seplen = sizeof(s_log_sep) - 1;
+    size_t used = 0;
+
+    /* Копирование через memcpy, а не побайтовым циклом: критическая
      * секция гасит прерывания, а канал на 420000 бод их ждать не любит. */
     portENTER_CRITICAL_SAFE(&s_log_mux);
-    size_t avail = s_log_wrapped ? DIAG_LOG_BUF_SIZE : s_log_head;
-    size_t start = s_log_wrapped ? s_log_head : 0;
-    if (avail > out_size - 1) {
-        /* не влезает — отдаём свежий хвост, он важнее */
-        start = (start + (avail - (out_size - 1))) % DIAG_LOG_BUF_SIZE;
-        avail = out_size - 1;
+
+    size_t pinned = s_log_pinned_len;
+    if (pinned > out_size - 1) pinned = out_size - 1;
+    memcpy(out, s_log_pinned, pinned);
+    used = pinned;
+
+    size_t avail = s_log_ring_wrapped ? DIAG_LOG_RING_SIZE : s_log_ring_head;
+    size_t start = s_log_ring_wrapped ? s_log_ring_head : 0;
+
+    if (avail && used + seplen < out_size - 1) {
+        memcpy(out + used, s_log_sep, seplen);
+        used += seplen;
+
+        size_t room = out_size - 1 - used;
+        if (avail > room) {
+            /* не влезает — отдаём свежий хвост, он важнее */
+            start = (start + (avail - room)) % DIAG_LOG_RING_SIZE;
+            avail = room;
+        }
+        size_t first = DIAG_LOG_RING_SIZE - start;
+        if (first > avail) first = avail;
+        memcpy(out + used, s_log_ring + start, first);
+        if (avail > first) memcpy(out + used + first, s_log_ring, avail - first);
+        used += avail;
     }
-    size_t first = DIAG_LOG_BUF_SIZE - start;
-    if (first > avail) first = avail;
-    memcpy(out, s_log_buf + start, first);
-    if (avail > first) memcpy(out + first, s_log_buf, avail - first);
     portEXIT_CRITICAL_SAFE(&s_log_mux);
 
-    out[avail] = '\0';
-    return avail;
+    out[used] = '\0';
+    return used;
 }
 
 void diagnostics_set_verbose(bool enabled)

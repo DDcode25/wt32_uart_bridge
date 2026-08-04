@@ -45,9 +45,14 @@ void diagnostics_set_verbose(bool enabled);
 void   diagnostics_capture_log(void);
 bool   diagnostics_log_captured(void);
 
-/* Копирует накопленный лог в out как NUL-terminated строку.
- * Если буфер не вмещает всё — отдаётся свежий хвост.
- * Возвращает число скопированных байт без учёта NUL. */
+/* Размер буфера, которого гарантированно хватает diagnostics_log_dump()
+ * на всё содержимое: закреплённое начало + разделитель + кольцо. */
+#define DIAGNOSTICS_LOG_DUMP_MAX  6400
+
+/* Копирует накопленный лог в out как NUL-terminated строку: сначала
+ * закреплённое начало (старт каналов, передача UART0, получение адреса),
+ * затем свежие записи из кольца. Если места мало — начало приоритетнее,
+ * из кольца берётся хвост. Возвращает число байт без учёта NUL. */
 size_t diagnostics_log_dump(char *out, size_t out_size);
 
 #ifdef __cplusplus

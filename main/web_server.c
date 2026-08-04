@@ -138,7 +138,7 @@ static esp_err_t log_get(httpd_req_t *req)
 {
     REQUIRE_AUTH(req);
 
-    const size_t cap = 4096 + 1;
+    const size_t cap = DIAGNOSTICS_LOG_DUMP_MAX + 1;
     char *buf = malloc(cap);
     if (!buf) return httpd_resp_send_500(req);
 

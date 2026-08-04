@@ -79,8 +79,12 @@ static void supervisor_task(void *arg)
             prev_alive[i] = alive;
         }
 
-        /* Краткая сводка раз в 30 с, только при подробном логе */
-        if (s_config.verbose_log && (++tick % 60 == 0)) {
+        /* Краткая сводка раз в 30 с, только при подробном логе.
+         * Как только лог ушёл в кольцевой буфер (UART0 отдан каналу),
+         * периодику отключаем: она за минуты вытесняла оттуда всё
+         * полезное, а те же цифры всегда есть в /api/status. */
+        tick++;
+        if (s_config.verbose_log && !diagnostics_log_captured() && (tick % 60 == 0)) {
             netmgr_status_t ns;
             network_manager_get_status(&ns);
             ESP_LOGI(TAG, "heap=%lu link=%s",
