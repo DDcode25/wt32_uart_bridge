@@ -11,9 +11,19 @@
 
 static const char *TAG = "uart_mgr";
 
+/* Состояние прореживания дампа, своё на каждое направление. */
+typedef struct {
+    uint32_t last_ms;
+    uint32_t skipped_chunks;
+    uint32_t skipped_bytes;
+} dump_state_t;
+
 typedef struct {
     uart_mgr_channel_cfg_t cfg;
     uart_mgr_stats_t stats;
+    dump_state_t dump_rx;
+    dump_state_t dump_tx;
+    bool dump_enabled;   /* рантайм-флаг, в NVS не сохраняется */
     uart_mgr_rx_cb_t rx_cb;
     void *rx_cb_ctx;
     TaskHandle_t rx_task_handle;
@@ -95,6 +105,43 @@ static uart_stop_bits_t map_stopbits(uart_mgr_stopbits_t s)
     }
 }
 
+/* Дамп трафика канала в лог.
+ *
+ * Уровень намеренно WARN, а не INFO: diagnostics_set_verbose(false)
+ * поднимает порог логов до WARN, и дамп, включённый пользователем явно,
+ * молча исчезал бы вместе с отладочными сообщениями. */
+static void dump_bytes(uart_channel_t *ch, dump_state_t *st, const char *dir,
+                       const uint8_t *data, size_t len)
+{
+    if (!ch->dump_enabled || len == 0) return;
+
+    uint32_t now = (uint32_t)(esp_timer_get_time() / 1000);
+    if (st->last_ms && (now - st->last_ms) < UART_MGR_DUMP_MIN_INTERVAL_MS) {
+        st->skipped_chunks++;
+        st->skipped_bytes += len;
+        return;
+    }
+    st->last_ms = now;
+
+    size_t show = len < UART_MGR_DUMP_MAX_BYTES ? len : UART_MGR_DUMP_MAX_BYTES;
+    char hex[UART_MGR_DUMP_MAX_BYTES * 3 + 1];
+    for (size_t i = 0; i < show; i++) {
+        snprintf(hex + i * 3, 4, "%02x ", data[i]);
+    }
+    hex[show * 3 - 1] = '\0';   /* убрать хвостовой пробел */
+
+    const char *ellipsis = (show < len) ? " ..." : "";
+    if (st->skipped_chunks) {
+        ESP_LOGW(TAG, "%s %s %uB: %s%s [пропущено %u порций / %u Б]",
+                 ch->cfg.name, dir, (unsigned)len, hex, ellipsis,
+                 (unsigned)st->skipped_chunks, (unsigned)st->skipped_bytes);
+        st->skipped_chunks = 0;
+        st->skipped_bytes  = 0;
+    } else {
+        ESP_LOGW(TAG, "%s %s %uB: %s%s", ch->cfg.name, dir, (unsigned)len, hex, ellipsis);
+    }
+}
+
 static void rx_task(void *arg)
 {
     uart_channel_t *ch = (uart_channel_t *)arg;
@@ -108,6 +155,8 @@ static void rx_task(void *arg)
             ch->stats.rx_bytes += len;
             ch->stats.last_rx_time_ms = (uint32_t)(esp_timer_get_time() / 1000);
             xSemaphoreGive(ch->lock);
+
+            dump_bytes(ch, &ch->dump_rx, "RX", buf, (size_t)len);
 
             if (ch->rx_cb) {
                 ch->rx_cb(ch->cfg.channel_id, buf, (size_t)len, ch->rx_cb_ctx);
@@ -279,8 +328,28 @@ esp_err_t uart_manager_write(uint8_t channel_id, const uint8_t *data, size_t len
         xSemaphoreTake(ch->lock, portMAX_DELAY);
         ch->stats.tx_bytes += written;
         xSemaphoreGive(ch->lock);
+        dump_bytes(ch, &ch->dump_tx, "TX", data, (size_t)written);
     }
     return (written == (int)len) ? ESP_OK : ESP_FAIL;
+}
+
+esp_err_t uart_manager_set_dump(uint8_t channel_id, bool enabled)
+{
+    if (channel_id >= UART_MGR_NUM_CHANNELS) return ESP_ERR_INVALID_ARG;
+    uart_channel_t *ch = &s_channels[channel_id];
+    ch->dump_enabled = enabled;
+    /* Счётчики прореживания сбрасываем, иначе первая же строка после
+     * включения соврала бы про пропуски, накопленные в прошлый раз. */
+    ch->dump_rx = (dump_state_t){0};
+    ch->dump_tx = (dump_state_t){0};
+    ESP_LOGW(TAG, "%s: traffic dump %s", ch->cfg.name, enabled ? "ON" : "OFF");
+    return ESP_OK;
+}
+
+bool uart_manager_get_dump(uint8_t channel_id)
+{
+    if (channel_id >= UART_MGR_NUM_CHANNELS) return false;
+    return s_channels[channel_id].dump_enabled;
 }
 
 bool uart_manager_is_channel_alive(uint8_t channel_id)

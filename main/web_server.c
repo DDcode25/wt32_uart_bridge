@@ -162,6 +162,34 @@ static esp_err_t log_get(httpd_req_t *req)
     return err;
 }
 
+/* Включение/выключение дампа канала. Отдельно от /api/config, потому
+ * что дамп не хранится в NVS и действует только до перезагрузки. */
+static esp_err_t dump_post(httpd_req_t *req)
+{
+    REQUIRE_AUTH(req);
+    char *body = read_body(req);
+    if (!body) return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "invalid body");
+
+    cJSON *root = cJSON_Parse(body);
+    free(body);
+    if (!root) return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "invalid json");
+
+    cJSON *jch = cJSON_GetObjectItem(root, "channel");
+    cJSON *jen = cJSON_GetObjectItem(root, "enabled");
+    if (!cJSON_IsNumber(jch) || !cJSON_IsBool(jen) ||
+        jch->valueint < 0 || jch->valueint >= UART_MGR_NUM_CHANNELS) {
+        cJSON_Delete(root);
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST,
+                                   "expected {\"channel\":0..2,\"enabled\":bool}");
+    }
+
+    esp_err_t err = uart_manager_set_dump((uint8_t)jch->valueint, cJSON_IsTrue(jen));
+    cJSON_Delete(root);
+    if (err != ESP_OK) return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad channel");
+
+    return send_json(req, "{\"ok\":true}");
+}
+
 static esp_err_t config_get(httpd_req_t *req)
 {
     REQUIRE_AUTH(req);
@@ -388,7 +416,7 @@ esp_err_t web_server_start(app_config_t *cfg)
     s_cfg = cfg;
 
     httpd_config_t hcfg = HTTPD_DEFAULT_CONFIG();
-    hcfg.max_uri_handlers = 12;
+    hcfg.max_uri_handlers = 16;   /* с запасом: молчаливый отказ регистрации найти трудно */
     hcfg.stack_size = 8192;
     hcfg.lru_purge_enable = true;
     hcfg.task_priority = 4;   /* ниже UART/сетевых задач: web не должен мешать мосту */
@@ -410,6 +438,7 @@ esp_err_t web_server_start(app_config_t *cfg)
         { .uri = "/api/reboot",   .method = HTTP_POST, .handler = reboot_post },
         { .uri = "/api/factory",  .method = HTTP_POST, .handler = factory_post },
         { .uri = "/api/ota",      .method = HTTP_POST, .handler = ota_post },
+        { .uri = "/api/dump",     .method = HTTP_POST, .handler = dump_post },
     };
     for (size_t i = 0; i < sizeof(uris) / sizeof(uris[0]); i++) {
         httpd_register_uri_handler(s_server, &uris[i]);

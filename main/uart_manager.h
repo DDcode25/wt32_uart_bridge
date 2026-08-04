@@ -26,6 +26,15 @@ extern "C" {
 #define UART_MGR_RX_RING_BYTES  2048
 #define UART_MGR_TX_RING_BYTES  2048
 
+/* Ограничители дампа. CRSF на 400000 бод даёт около 50 кадров в секунду,
+ * и дамп каждого куска забил бы 4 КБ кольцевого буфера лога за секунду,
+ * вытеснив оттуда всё остальное, да ещё и нагрузил бы форматирование.
+ * Поэтому не чаще одной строки в 100 мс на канал и направление, а всё
+ * пропущенное за это время учитывается и печатается в следующей строке —
+ * дамп прорежен, но об этом честно сообщается. */
+#define UART_MGR_DUMP_MIN_INTERVAL_MS  100
+#define UART_MGR_DUMP_MAX_BYTES        32
+
 /* Префикс UART_MGR_, а не UART_ — hal/uart_types.h из ESP-IDF уже
  * занимает имена UART_PARITY_EVEN/UART_PARITY_ODD. */
 typedef enum {
@@ -113,6 +122,14 @@ void uart_manager_reset_stats(uint8_t channel_id);
 
 /* Заполняет структуру заводскими значениями по умолчанию (board_config.h) */
 void uart_manager_default_config(uint8_t channel_id, uart_mgr_channel_cfg_t *out_cfg);
+
+/* Побайтовый дамп трафика канала в лог (/api/log).
+ *
+ * Намеренно НЕ входит в app_config_t и не сохраняется в NVS: это
+ * отладочный переключатель, после перезагрузки он всегда выключен.
+ * Забытый включённым дамп иначе молча грузил бы лог в рабочем режиме. */
+esp_err_t uart_manager_set_dump(uint8_t channel_id, bool enabled);
+bool      uart_manager_get_dump(uint8_t channel_id);
 
 #ifdef __cplusplus
 }

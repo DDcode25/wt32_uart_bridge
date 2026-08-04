@@ -263,6 +263,7 @@ char *diagnostics_status_json(void)
         cJSON_AddNumberToObject(c, "tx_gpio", ucfg.tx_gpio);
         cJSON_AddBoolToObject(c, "enabled", ucfg.enabled);
         cJSON_AddBoolToObject(c, "alive", uart_manager_is_channel_alive(i));
+        cJSON_AddBoolToObject(c, "dump_enabled", uart_manager_get_dump(i));
 
         cJSON_AddNumberToObject(c, "rx_bytes", (double)ust.rx_bytes);
         cJSON_AddNumberToObject(c, "tx_bytes", (double)ust.tx_bytes);

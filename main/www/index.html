@@ -121,6 +121,13 @@ table.api code{background:#0d1015;border:1px solid var(--line);border-radius:4px
     <div class="row"><span class="hint" style="margin-left:190px">Отключите после отладки: подробный лог влияет на задержку рабочих UART.</span></div>
     <button class="act" onclick="save()">Сохранить</button>
   </div>
+  <div class="card"><h2>Дамп трафика</h2>
+    <p class="hint" style="margin:0 0 10px">Пишет байты канала в лог ниже. <b>Не сохраняется</b> —
+    после перезагрузки платы всегда выключен, кнопка «Сохранить» на него не влияет.
+    Поток прорежен: не чаще строки в 100 мс на направление, до 32 байт, число пропущенных
+    порций указывается в квадратных скобках. Включённый дамп нагружает лог и вытесняет из него остальное.</p>
+    <div id="dumptoggles"></div>
+  </div>
   <div class="card"><h2>Лог устройства</h2>
     <p class="hint" style="margin:0 0 10px">Serial-консоль замолкает, как только канал AUX забирает UART0 — тогда это
     единственный способ прочитать лог. Начало (старт каналов, передача UART0, получение адреса)
@@ -152,6 +159,9 @@ table.api code{background:#0d1015;border:1px solid var(--line);border-radius:4px
           <td>Перезагрузка устройства, тело не требуется</td></tr>
       <tr><td>POST</td><td>/api/factory</td>
           <td><code>{"confirm":"ERASE"}</code> — сброс к заводским настройкам</td></tr>
+      <tr><td>POST</td><td>/api/dump</td>
+          <td><code>{"channel":0..2,"enabled":true}</code> — дамп трафика канала.
+              Не сохраняется в NVS, после перезагрузки всегда выключен</td></tr>
       <tr><td>POST</td><td>/api/ota</td>
           <td>Обновление прошивки. Тело — сырой <code>firmware.bin</code>,
               не JSON и не multipart. Объединённый образ будет отвергнут</td></tr>
@@ -217,6 +227,17 @@ document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('on'));
   document.getElementById('p-'+b.dataset.p).classList.add('on');
   if(b.dataset.p==='diag')loadLog();});
+
+/* Дамп применяется сразу и мимо конфигурации — своя ручка, не save(). */
+async function setDump(ch,on){
+  try{
+    const r=await fetch('/api/dump',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({channel:ch,enabled:on})});
+    if(!r.ok){toast('не удалось переключить дамп',1);return;}
+    toast(`дамп канала ${ch}: ${on?'включён':'выключен'}`);
+    if(on)setTimeout(loadLog,400);
+  }catch(e){toast('нет связи с устройством',1);}
+}
 
 /* textContent, а не innerHTML: в лог попадает произвольный текст с устройства. */
 async function loadLog(){
@@ -432,6 +453,13 @@ async function poll(){
       `<div style="margin-bottom:8px"><b>${c.name}</b> — ${PROTOS[c.protocol]}, ${c.baud_rate} бод,
        GPIO rx${c.rx_gpio}/tx${c.tx_gpio} ${c.enabled?(c.alive?'<span class="ok">активен</span>':'<span class="warn">нет данных</span>'):'<span class="err">выключен</span>'}<br>
        <span style="color:var(--mut);font-size:12px">RX ${c.rx_bytes} Б / TX ${c.tx_bytes} Б · UDP ${c.udp_rx_packets}/${c.udp_tx_packets} · TCP клиентов ${c.tcp_clients}</span></div>`).join('');
+
+    /* Состояние берём из статуса, а не из локального флага: дамп могли
+       переключить из другой вкладки или курлом. */
+    document.getElementById('dumptoggles').innerHTML=s.channels.map(c=>
+      `<div class="row"><label>${c.name}</label>
+       <input type="checkbox" ${c.dump_enabled?'checked':''}
+              onchange="setDump(${c.channel_id},this.checked)"></div>`).join('');
 
     document.getElementById('diagdetail').innerHTML=s.channels.map(c=>{
       let t=`<div class="card" style="background:#0d1015"><h2>${c.name}</h2><table>`+
