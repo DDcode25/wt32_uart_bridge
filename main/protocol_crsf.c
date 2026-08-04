@@ -6,11 +6,13 @@
  * несколько адресов безопасно — проверка целостности не меняется. */
 static bool crsf_addr_known(uint8_t b)
 {
+    /* CRSF_ADDR_BROADCAST (0x00) намеренно НЕ принимается: нулевые байты
+     * в потоке встречаются постоянно, и парсер цеплялся бы за каждый,
+     * читал мусорную длину и терял настоящее начало кадра. */
     return b == CRSF_ADDR_FLIGHT_CONTROLLER ||
            b == CRSF_ADDR_CRSF_TRANSMITTER  ||
            b == CRSF_ADDR_RADIO_TRANSMITTER ||
-           b == CRSF_ADDR_RECEIVER          ||
-           b == CRSF_ADDR_BROADCAST;
+           b == CRSF_ADDR_RECEIVER;
 }
 
 uint8_t crsf_crc8_dvb_s2(const uint8_t *data, size_t len)
