@@ -52,6 +52,17 @@ table.api td:nth-child(2){width:150px;color:var(--fg)}
 table.api a{color:var(--acc);text-decoration:none}
 table.api a:hover{text-decoration:underline}
 table.api code{background:#0d1015;border:1px solid var(--line);border-radius:4px;padding:1px 5px;font-size:12px}
+.chblock{margin-bottom:14px}
+.chblock:last-child{margin-bottom:0}
+/* Своя таблица счётчиков: общие правила задают первой колонке 48%
+   и рамку каждой строке, для трёх узких колонок это не годится. */
+.chtab{width:auto;margin:7px 0 5px;font-size:12px}
+.chtab th{color:var(--mut);font-weight:500;text-align:right;padding:2px 12px 4px 0;
+          border-bottom:1px solid var(--line)}
+.chtab th:first-child{width:52px}
+.chtab td{padding:3px 12px 3px 0;border-bottom:none;text-align:right;
+          font-variant-numeric:tabular-nums}
+.chtab td:first-child{width:auto;color:var(--mut);text-align:left}
 input.ip{width:130px}
 input.port{width:90px}
 
@@ -468,6 +479,7 @@ function importCfg(inp){
 }
 
 function row(k,v){return `<tr><td>${k}</td><td>${v}</td></tr>`;}
+function num(n){return (n||0).toLocaleString('ru-RU');}
 function fmtUp(ms){const s=Math.floor(ms/1000);return `${Math.floor(s/86400)}д ${Math.floor(s%86400/3600)}ч ${Math.floor(s%3600/60)}м ${s%60}с`;}
 
 async function poll(){
@@ -498,9 +510,17 @@ async function poll(){
       row('Схема конфигурации','v'+(cfg?cfg.schema_version:'?'));
 
     document.getElementById('chsummary').innerHTML=s.channels.map(c=>
-      `<div style="margin-bottom:8px"><b>${c.name}</b> — ${PROTOS[c.protocol]}, ${c.baud_rate} бод,
-       GPIO rx${c.rx_gpio}/tx${c.tx_gpio} ${c.enabled?(c.alive?'<span class="ok">активен</span>':'<span class="warn">нет данных</span>'):'<span class="err">выключен</span>'}<br>
-       <span style="color:var(--mut);font-size:12px">RX ${c.rx_bytes} Б / TX ${c.tx_bytes} Б · UDP ${c.udp_rx_packets}/${c.udp_tx_packets} · TCP клиентов ${c.tcp_clients}</span></div>`).join('');
+      `<div class="chblock">
+         <b>${c.name}</b> — ${PROTOS[c.protocol]}, ${c.baud_rate} бод, GPIO rx${c.rx_gpio}/tx${c.tx_gpio}
+         ${c.enabled?(c.alive?'<span class="ok">активен</span>':'<span class="warn">нет данных</span>'):'<span class="err">выключен</span>'}
+         <table class="chtab">
+           <tr><th></th><th>RX</th><th>TX</th></tr>
+           <tr><td>UART</td><td>${num(c.rx_bytes)} Б</td><td>${num(c.tx_bytes)} Б</td></tr>
+           <tr><td>UDP</td><td>${num(c.udp_rx_packets)} пак.</td><td>${num(c.udp_tx_packets)} пак.</td></tr>
+           <tr><td>TCP</td><td>${num(c.tcp_rx_bytes)} Б</td><td>${num(c.tcp_tx_bytes)} Б</td></tr>
+         </table>
+         <span class="hint">TCP клиентов: ${c.tcp_clients}${c.udp_rx_dropped?` · UDP отброшено: ${num(c.udp_rx_dropped)}`:''}${c.rx_overruns?` · <span class="err">UART overruns: ${num(c.rx_overruns)}</span>`:''}</span>
+       </div>`).join('');
 
     /* Состояние берём из статуса, а не из локального флага: дамп могли
        переключить из другой вкладки или курлом. */
