@@ -52,6 +52,41 @@ table.api td:nth-child(2){width:150px;color:var(--fg)}
 table.api a{color:var(--acc);text-decoration:none}
 table.api a:hover{text-decoration:underline}
 table.api code{background:#0d1015;border:1px solid var(--line);border-radius:4px;padding:1px 5px;font-size:12px}
+input.ip{width:130px}
+input.port{width:90px}
+
+/* ---------- адаптация под телефон ----------
+   На узком экране колонка подписей в 190px не оставляла места полю
+   ввода, а подсказки под ним сдвигались на те же 190px и сжимались в
+   нечитаемый столбик. Подпись уходит над полем, поле — на всю ширину. */
+@media (max-width:640px){
+  main{padding:10px}
+  .card{padding:11px;margin-bottom:11px}
+  .card h2{margin-bottom:10px}
+
+  .row{gap:6px;margin-bottom:13px}
+  .row label{flex:0 0 100%}
+  .row .hint{margin-left:0;margin-top:0}
+
+  /* 16px — не косметика: при меньшем размере Safari на iOS сам
+     масштабирует страницу, как только поле получает фокус. */
+  .row input:not([type=checkbox]),.row select{width:100%;min-width:0;padding:10px;font-size:16px}
+  .row input[type=checkbox]{width:22px;height:22px}
+
+  /* Строку с галочкой не разрываем: подпись и галочка остаются рядом. */
+  .row:has(input[type=checkbox]) label{flex:1 1 auto}
+
+  /* Адрес и порт делят одну строку, а не занимают по строке каждый. */
+  .row input.ip{flex:1 1 62%}
+  .row input.port{flex:0 0 30%}
+
+  button.act,button.ghost,button.danger{padding:11px 16px;min-height:44px}
+
+  /* Фиксированные доли колонок на узком экране душат текст. */
+  td:first-child{width:auto}
+  table.api td:first-child,table.api td:nth-child(2){width:auto;white-space:nowrap}
+  .ch{width:calc(50% - 6px)}
+}
 </style>
 </head>
 <body>
@@ -296,8 +331,8 @@ function uartForm(c){
   <div class="row"><span class="hint">Отключите, чтобы принимать управляющий трафик только с доверенного адреса.</span></div>
   <h2 style="margin-top:14px">UDP destinations (fan-out)</h2>
   ${c.udp_destinations.map((d,i)=>`<div class="row"><label>Адресат ${i+1}</label>
-    <input id="c${id}_d${i}_ip" value="${d.ip}" style="width:130px">
-    <input type="number" id="c${id}_d${i}_p" value="${d.port}" style="width:90px" min="0" max="65535">
+    <input class="ip" id="c${id}_d${i}_ip" value="${d.ip}">
+    <input class="port" type="number" id="c${id}_d${i}_p" value="${d.port}" min="0" max="65535">
     <input type="checkbox" id="c${id}_d${i}_e" ${d.enabled?'checked':''}></div>`).join('')}
   <div class="row"><span class="hint">Если ни один адресат не включён, ответы уходят на адрес последнего входящего пакета.</span></div>
   </div>`;
