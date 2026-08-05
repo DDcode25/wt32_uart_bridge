@@ -73,9 +73,13 @@ jobs:
             .pio/build/wt32-eth01/firmware.bin
             .pio/build/wt32-eth01/firmware.elf
 
+      # Тег с дефисом в версии (v1.2.0-beta.1, v1.3.0-rc.2) — предрелиз
+      # по semver. Без этого GitHub пометил бы beta как последний
+      # стабильный релиз, и на неё указывала бы ссылка "latest".
       - name: Publish release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
           files: firmware_merged.bin
           generate_release_notes: true
+          prerelease: ${{ contains(github.ref_name, '-') }}

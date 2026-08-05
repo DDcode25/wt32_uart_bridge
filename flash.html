@@ -114,8 +114,31 @@
     </span>
   </esp-web-install-button>
   <p class="hint">
-    Образ единый, пишется с адреса <code>0x0</code>: загрузчик, таблица разделов,
-    <code>ota_data_initial</code> и приложение.
+    Стабильный выпуск. Образ единый, пишется с адреса <code>0x0</code>:
+    загрузчик, таблица разделов, <code>ota_data_initial</code> и приложение.
+  </p>
+</div>
+
+<h2>3a. Бета-версия</h2>
+
+<p>Сборка с изменениями, которые ещё не вошли в стабильный выпуск. Работает так же,
+но проверена меньше. Если что-то пойдёт не так — стабильную можно залить обратно
+кнопкой выше, слоты OTA независимы.</p>
+
+<div class="install">
+  <esp-web-install-button manifest="firmware/beta/manifest.json">
+    <button slot="activate">Подключить и прошить бета-версию</button>
+    <span slot="unsupported" class="unsupported">
+      Этот браузер не поддерживает Web Serial. Откройте страницу в Chrome или Edge на компьютере.
+    </span>
+    <span slot="not-allowed" class="unsupported">
+      Страница должна открываться по HTTPS.
+    </span>
+  </esp-web-install-button>
+  <p class="hint">
+    Список изменений — в
+    <a href="https://github.com/DDcode25/wt32_uart_bridge/releases">разделе Releases</a>,
+    бета-выпуски помечены там как pre-release.
   </p>
 </div>
 
@@ -151,8 +174,9 @@
 обновление по сети.</p>
 
 <p>Для этого нужен <a href="firmware/firmware.bin" download><strong>firmware.bin</strong></a>
-— только приложение. Объединённый образ с этой страницы для OTA не подходит:
-он содержит загрузчик и таблицу разделов, и проверка его отвергнет.</p>
+— только приложение (бета-версия: <a href="firmware/beta/firmware.bin" download>firmware.bin</a>).
+Объединённый образ с этой страницы для OTA не подходит: он содержит загрузчик
+и таблицу разделов, и проверка его отвергнет.</p>
 
 <div class="note">
   <p>Доступ к OTA подчинён общей настройке аутентификации. Пока вход без
