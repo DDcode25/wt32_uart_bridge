@@ -60,7 +60,7 @@ void diagnostics_get_firmware(fw_info_t *out)
 
     const esp_app_desc_t *d = esp_app_get_description();
     out->version     = d->version;
-    out->project     = d->project_name;
+    out->project     = FIRMWARE_DISPLAY_NAME;
     out->build_date  = d->date;
     out->build_time  = d->time;
     out->idf_version = d->idf_ver;

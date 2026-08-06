@@ -11,6 +11,12 @@
 extern "C" {
 #endif
 
+/* Имя, которое видит пользователь в web-интерфейсе (строка "Проект" на
+ * вкладке Firmware/About). Отдельная константа, а не имя из дескриптора
+ * приложения: там лежит имя CMake-проекта, оно же имя цели сборки и
+ * имя артефакта, менять его ради подписи на странице незачем. */
+#define FIRMWARE_DISPLAY_NAME "UART Bridge"
+
 typedef struct {
     uint64_t uptime_ms;
     const char *reset_reason;
