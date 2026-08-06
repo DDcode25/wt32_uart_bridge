@@ -480,7 +480,8 @@ function importCfg(inp){
 
 function row(k,v){return `<tr><td>${k}</td><td>${v}</td></tr>`;}
 function num(n){return (n||0).toLocaleString('ru-RU');}
-function fmtUp(ms){const s=Math.floor(ms/1000);return `${Math.floor(s/86400)}д ${Math.floor(s%86400/3600)}ч ${Math.floor(s%3600/60)}м ${s%60}с`;}
+function fmtUp(ms){const s=Math.floor(ms/1000),p=n=>String(n).padStart(2,'0');
+  return `${Math.floor(s/86400)} D ${Math.floor(s%86400/3600)}h ${p(Math.floor(s%3600/60))}:${p(s%60)}`;}
 
 async function poll(){
   try{
@@ -493,7 +494,7 @@ async function poll(){
 
     document.getElementById('systab').innerHTML=
       row('Uptime',fmtUp(s.system.uptime_ms))+row('Причина перезагрузки',s.system.reset_reason)+
-      row('Свободная память',s.system.free_heap+' Б')+row('Минимум за сессию',s.system.min_free_heap+' Б');
+      row('Свободная память',s.system.free_heap+' b')+row('Минимум за сессию',s.system.min_free_heap+' b');
     document.getElementById('ethtab').innerHTML=
       row('Link',s.ethernet.link_up?'<span class="ok">UP</span>':'<span class="err">DOWN</span>')+
       row('MAC',s.ethernet.mac)+row('IP',s.ethernet.ip)+row('Маска',s.ethernet.netmask)+
