@@ -64,6 +64,12 @@ table.api code{background:#0d1015;border:1px solid var(--line);border-radius:4px
 .chtab td{padding:3px 12px 3px 0;border-bottom:none;text-align:right;
           font-variant-numeric:tabular-nums}
 .chtab td:first-child{width:auto;color:var(--mut);text-align:left}
+.profcard{border:1px solid var(--line);border-radius:6px;padding:10px;background:#0d1015;margin-top:4px}
+.proftab{width:auto;margin:7px 0 6px;font-size:12px}
+.proftab th{color:var(--mut);font-weight:500;text-align:left;padding:2px 14px 4px 0;border-bottom:1px solid var(--line)}
+.proftab td{padding:3px 14px 3px 0;border-bottom:none;width:auto}
+.proftab td:first-child{color:var(--fg);width:auto}
+#profdesc{min-height:132px}
 input.ip{width:130px}
 input.port{width:90px}
 
@@ -125,13 +131,15 @@ input.port{width:90px}
   <div class="card"><h2>Ethernet</h2><table id="ethtab"></table></div>
   <div class="card"><h2>Каналы</h2><div id="chsummary"></div></div>
   <div class="card"><h2>Готовые профили</h2>
-    <div class="warnbox">Профиль перезаписывает настройки протоколов и портов всех каналов. GPIO и сетевые параметры не меняются.</div>
-    <div class="row">
-      <button class="act ghost" onclick="applyProfile(1)">A — Sine.Link/Centurion</button>
-      <button class="act ghost" onclick="applyProfile(2)">B — Mission Planner</button>
-      <button class="act ghost" onclick="applyProfile(3)">C — RadioMaster TX16S</button>
-      <button class="act ghost" onclick="applyProfile(4)">D — Универсальный мост</button>
+    <div class="warnbox">Профиль перезаписывает протоколы, скорости и сетевые режимы затронутых каналов.
+    Какие именно каналы затронуты — зависит от профиля, см. описание ниже. GPIO, адрес платы и пароль не меняются.</div>
+    <div class="row" id="profbtns">
+      <button class="act ghost" data-prof="1" onclick="applyProfile(1)">A — Sine.Link/Centurion</button>
+      <button class="act ghost" data-prof="2" onclick="applyProfile(2)">B — Mission Planner</button>
+      <button class="act ghost" data-prof="3" onclick="applyProfile(3)">C — RadioMaster TX16S</button>
+      <button class="act ghost" data-prof="4" onclick="applyProfile(4)">D — Универсальный мост</button>
     </div>
+    <div id="profdesc"></div>
   </div>
 </div>
 
@@ -310,6 +318,44 @@ async function loadLog(){
   box.scrollTop=box.scrollHeight;
 }
 
+/* Тексты повторяют config_manager_apply_profile() в config_manager.c.
+   Важное отличие профилей: A и D переписывают все три канала, а B и C
+   трогают только часть — остальные остаются как были. */
+const PROFDESC={
+ 1:{t:'A — Sine.Link/Centurion',c:'Переписывает все три канала',
+    r:[['UART1','CRSF, 400000 бод, инверсия RX','UDP 14555'],
+       ['UART2','MAVLink, 115200 бод','UDP 14550 + TCP 1310'],
+       ['UART0/AUX','RAW','UDP 14560']]},
+ 2:{t:'B — Mission Planner',c:'Меняет только UART2, остальные каналы не трогает',
+    r:[['UART2','MAVLink, 115200 бод','UDP 14550 + TCP 1310, обмен в обе стороны, fan-out выключен']]},
+ 3:{t:'C — RadioMaster TX16S',c:'Меняет UART1 и UART2, канал AUX не трогает',
+    r:[['UART1','CRSF, 400000 бод, инверсия RX, watchdog 500 мс','UDP 14555'],
+       ['UART2','MAVLink, 57600 бод','UDP 14550, без TCP']]},
+ 4:{t:'D — Универсальный мост',c:'Переписывает все три канала, без разбора протоколов',
+    r:[['UART0/AUX','RAW','UDP 14550'],
+       ['UART1','RAW','UDP 14560'],
+       ['UART2','RAW','UDP 14570']]}};
+
+function showProf(n){
+  const d=document.getElementById('profdesc');
+  if(!n){d.innerHTML='<span class="hint">Наведите на профиль, чтобы увидеть, что он изменит.</span>';return;}
+  const p=PROFDESC[n];
+  d.innerHTML=`<div class="profcard"><b>${p.t}</b> — ${p.c}
+    <table class="proftab"><tr><th>Канал</th><th>Порт</th><th>Сеть</th></tr>`+
+    p.r.map(x=>`<tr><td>${x[0]}</td><td>${x[1]}</td><td>${x[2]}</td></tr>`).join('')+
+    `</table><span class="hint">Изменения применяются сразу и сохраняются в NVS.</span></div>`;
+}
+document.querySelectorAll('#profbtns button').forEach(b=>{
+  const n=+b.dataset.prof;
+  const p=PROFDESC[n];
+  b.title=p.c+': '+p.r.map(x=>`${x[0]} — ${x[1]}, ${x[2]}`).join('; ');
+  b.addEventListener('mouseenter',()=>showProf(n));
+  b.addEventListener('focus',()=>showProf(n));
+  b.addEventListener('mouseleave',()=>showProf(0));
+  b.addEventListener('blur',()=>showProf(0));
+});
+showProf(0);
+
 function opts(arr,sel){return arr.map((v,i)=>`<option value="${i}"${i==sel?' selected':''}>${v}</option>`).join('');}
 
 function uartForm(c){
@@ -416,7 +462,11 @@ async function save(){
   toast(r.ok?'Сохранено. Часть параметров применится после перезагрузки.':'Ошибка сохранения',!r.ok);
 }
 async function applyProfile(p){
-  if(!confirm('Применить профиль? Текущие настройки протоколов и портов будут перезаписаны.'))return;
+  /* Сводку кладём прямо в диалог: на сенсорном экране наведения нет,
+     и панель с описанием пользователь бы не увидел. */
+  const d=PROFDESC[p];
+  const what=d?`\n\n${d.t}\n${d.c}.\n\n`+d.r.map(x=>`${x[0]}: ${x[1]} -> ${x[2]}`).join('\n')+'\n':'';
+  if(!confirm(`Применить профиль?${what}\nТекущие настройки протоколов и портов будут перезаписаны.`))return;
   const r=await fetch('/api/profile',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({profile:p})});
   if(r.ok){toast('Профиль применён');loadCfg();}else toast('Ошибка',1);
 }
