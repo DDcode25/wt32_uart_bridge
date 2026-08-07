@@ -547,7 +547,7 @@ async function poll(){
     const r=await fetch('/api/status');if(!r.ok)return;
     const s=await r.json();
     const badge=document.getElementById('linkbadge');
-    badge.textContent=s.ethernet.link_up?`Link ${s.ethernet.link_speed_mbps}M ${s.ethernet.full_duplex?'FD':'HD'}`:'Link DOWN';
+    badge.textContent=s.ethernet.link_up?`ETH ${s.ethernet.link_speed_mbps}M ${s.ethernet.full_duplex?'FD':'HD'}`:'ETH DOWN';
     badge.className=s.ethernet.link_up?'up':'down';
     document.getElementById('ipinfo').textContent=s.ethernet.got_ip?s.ethernet.ip:'нет IP';
 
