@@ -11,11 +11,13 @@
 body{margin:0;font:14px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--fg)}
 header{background:var(--panel);border-bottom:1px solid var(--line);padding:12px 16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
 header h1{font-size:16px;margin:0;font-weight:600}
-#linkbadge{font-size:12px;padding:3px 8px;border-radius:10px;background:#333;color:var(--mut)}
+#linkbadge{font-size:12px;padding:3px 8px;border-radius:10px;background:#333;color:var(--mut);cursor:pointer}
+#linkbadge:hover{filter:brightness(1.45)}
 #linkbadge.up{background:rgba(62,207,142,.15);color:var(--ok)}
 #linkbadge.down{background:rgba(255,92,92,.15);color:var(--err)}
 #chbadges{display:flex;gap:5px}
-.chbadge{font-size:11px;padding:3px 7px;border-radius:10px;background:#333;color:var(--mut)}
+.chbadge{font-size:11px;padding:3px 7px;border-radius:10px;background:#333;color:var(--mut);cursor:pointer}
+.chbadge:hover{filter:brightness(1.45)}
 .chbadge.on{background:rgba(62,207,142,.15);color:var(--ok)}
 .chbadge.idle{background:rgba(255,180,84,.15);color:var(--warn)}
 nav{display:flex;gap:2px;padding:8px 16px;background:var(--panel);border-bottom:1px solid var(--line);overflow-x:auto}
@@ -114,7 +116,7 @@ input.port{width:90px}
 <body>
 <header>
   <h1>🛩️ UART⇄Ethernet Bridge</h1>
-  <span id="linkbadge">…</span>
+  <span id="linkbadge" title="Открыть настройки сети">…</span>
   <span id="chbadges"></span>
   <span style="margin-left:auto;color:var(--mut);font-size:12px" id="ipinfo"></span>
 </header>
@@ -295,11 +297,17 @@ const PARITY=["None","Even","Odd"];const STOP=["1","1.5","2"];const DUPLEX=["Ful
 let cfg=null;
 
 function toast(m,bad){const t=document.getElementById('toast');t.textContent=m;t.style.borderColor=bad?'var(--err)':'var(--ok)';t.style.display='block';setTimeout(()=>t.style.display='none',2600);}
-document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{
-  document.querySelectorAll('nav button').forEach(x=>x.classList.remove('active'));b.classList.add('active');
-  document.querySelectorAll('.page').forEach(p=>p.classList.remove('on'));
-  document.getElementById('p-'+b.dataset.p).classList.add('on');
-  if(b.dataset.p==='diag')loadLog();});
+/* Переключение вкладки вынесено сюда: этим же путём ходят индикаторы
+   ETH/U0/U1/U2 в шапке, и подсветка нужной кнопки не должна разъезжаться
+   в зависимости от того, откуда перешли. */
+function goTab(p){
+  if(!document.getElementById('p-'+p))return;
+  document.querySelectorAll('nav button').forEach(x=>x.classList.toggle('active',x.dataset.p===p));
+  document.querySelectorAll('.page').forEach(el=>el.classList.toggle('on',el.id==='p-'+p));
+  if(p==='diag')loadLog();
+}
+document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>goTab(b.dataset.p));
+document.getElementById('linkbadge').onclick=()=>goTab('net');
 
 /* Дамп применяется сразу и мимо конфигурации — своя ручка, не save(). */
 async function setDump(ch,on){
@@ -573,7 +581,8 @@ async function poll(){
       .slice().sort((a,b)=>a.channel_id-b.channel_id).map(c=>{
         const cls=!c.enabled?'':(c.alive?'on':'idle');
         const st=!c.enabled?'выключен':(c.alive?'активен':'нет данных');
-        return `<span class="chbadge ${cls}" title="${esc(c.name)} — ${st}">U${c.channel_id}</span>`;
+        return `<span class="chbadge ${cls}" title="${esc(c.name)} — ${st}. Открыть настройки"
+                      onclick="goTab('u${c.channel_id}')">U${c.channel_id}</span>`;
       }).join('');
 
     document.getElementById('chsummary').innerHTML=s.channels.map(c=>
