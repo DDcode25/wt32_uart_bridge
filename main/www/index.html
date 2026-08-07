@@ -14,6 +14,10 @@ header h1{font-size:16px;margin:0;font-weight:600}
 #linkbadge{font-size:12px;padding:3px 8px;border-radius:10px;background:#333;color:var(--mut)}
 #linkbadge.up{background:rgba(62,207,142,.15);color:var(--ok)}
 #linkbadge.down{background:rgba(255,92,92,.15);color:var(--err)}
+#chbadges{display:flex;gap:5px}
+.chbadge{font-size:11px;padding:3px 7px;border-radius:10px;background:#333;color:var(--mut)}
+.chbadge.on{background:rgba(62,207,142,.15);color:var(--ok)}
+.chbadge.idle{background:rgba(255,180,84,.15);color:var(--warn)}
 nav{display:flex;gap:2px;padding:8px 16px;background:var(--panel);border-bottom:1px solid var(--line);overflow-x:auto}
 nav button{background:none;border:none;color:var(--mut);padding:7px 12px;border-radius:6px;cursor:pointer;font-size:13px;white-space:nowrap}
 nav button.active{background:var(--acc);color:#fff}
@@ -111,6 +115,7 @@ input.port{width:90px}
 <header>
   <h1>🛩️ UART⇄Ethernet Bridge</h1>
   <span id="linkbadge">…</span>
+  <span id="chbadges"></span>
   <span style="margin-left:auto;color:var(--mut);font-size:12px" id="ipinfo"></span>
 </header>
 <nav>
@@ -531,6 +536,9 @@ function importCfg(inp){
 
 function row(k,v){return `<tr><td>${k}</td><td>${v}</td></tr>`;}
 function num(n){return (n||0).toLocaleString('ru-RU');}
+/* Имя канала задаётся через /api/config, то есть приходит извне.
+   В атрибут title кавычка в имени вставила бы свой атрибут. */
+function esc(t){return String(t).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
 function fmtUp(ms){const s=Math.floor(ms/1000),p=n=>String(n).padStart(2,'0');
   return `${Math.floor(s/86400)} D ${Math.floor(s%86400/3600)}h ${p(Math.floor(s%3600/60))}:${p(s%60)}`;}
 
@@ -561,9 +569,16 @@ async function poll(){
       row('ESP-IDF',s.system.idf_version)+
       row('Схема конфигурации','v'+(cfg?cfg.schema_version:'?'));
 
+    document.getElementById('chbadges').innerHTML=s.channels
+      .slice().sort((a,b)=>a.channel_id-b.channel_id).map(c=>{
+        const cls=!c.enabled?'':(c.alive?'on':'idle');
+        const st=!c.enabled?'выключен':(c.alive?'активен':'нет данных');
+        return `<span class="chbadge ${cls}" title="${esc(c.name)} — ${st}">U${c.channel_id}</span>`;
+      }).join('');
+
     document.getElementById('chsummary').innerHTML=s.channels.map(c=>
       `<div class="chblock">
-         <b>${c.name}</b> — ${PROTOS[c.protocol]}, ${c.baud_rate} бод, GPIO rx${c.rx_gpio}/tx${c.tx_gpio}
+         <b>${esc(c.name)}</b> — ${PROTOS[c.protocol]}, ${c.baud_rate} бод, GPIO rx${c.rx_gpio}/tx${c.tx_gpio}
          ${c.enabled?(c.alive?'<span class="ok">активен</span>':'<span class="warn">нет данных</span>'):'<span class="err">выключен</span>'}
          <table class="chtab">
            <tr><th></th><th>RX</th><th>TX</th></tr>
