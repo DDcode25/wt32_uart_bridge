@@ -190,6 +190,18 @@ static esp_err_t dump_post(httpd_req_t *req)
     return send_json(req, "{\"ok\":true}");
 }
 
+/* Иконка вкладки встроена в <head> как data:-ссылка, поэтому со
+ * страницы за /favicon.ico браузер не ходит. Но при открытии адреса
+ * вида /api/status напрямую HTML не разбирается, и запрос всё равно
+ * приходит — без
+ * этого обработчика каждый такой заход писал в лог пару строк 404,
+ * а буфер лога всего 4 КБ. 204 значит "иконки нет, больше не спрашивай". */
+static esp_err_t favicon_get(httpd_req_t *req)
+{
+    httpd_resp_set_status(req, "204 No Content");
+    return httpd_resp_send(req, NULL, 0);
+}
+
 static esp_err_t config_get(httpd_req_t *req)
 {
     REQUIRE_AUTH(req);
@@ -452,6 +464,7 @@ esp_err_t web_server_start(app_config_t *cfg)
 
     static const httpd_uri_t uris[] = {
         { .uri = "/",             .method = HTTP_GET,  .handler = root_get },
+        { .uri = "/favicon.ico", .method = HTTP_GET,  .handler = favicon_get },
         { .uri = "/api/status",   .method = HTTP_GET,  .handler = status_get },
         { .uri = "/api/log",      .method = HTTP_GET,  .handler = log_get },
         { .uri = "/api/config",   .method = HTTP_GET,  .handler = config_get },
