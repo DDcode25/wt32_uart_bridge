@@ -8,6 +8,8 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "driver/gpio.h"
+#include "esp_rom_gpio.h"      /* однопроводный режим: ручная развязка сигналов UART */
+#include "soc/uart_periph.h"
 
 static const char *TAG = "uart_mgr";
 
@@ -284,10 +286,27 @@ esp_err_t uart_manager_apply_config(const uart_mgr_channel_cfg_t *cfg)
         }
         uart_set_mode(port, UART_MODE_RS485_HALF_DUPLEX);
     } else if (cfg->duplex == UART_DUPLEX_HALF_SINGLE_WIRE) {
-        /* Single-wire: TX и RX на одном GPIO (S.Port и подобные) */
-        uart_set_pin(port, cfg->tx_gpio, cfg->tx_gpio, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
+        /* Single-wire: один вывод и на приём, и на передачу.
+         *
+         * Порядок здесь принципиален. gpio_set_direction() с режимом
+         * вывода внутри вызывает gpio_output_enable(), а тот переключает
+         * выход пада на регистр GPIO вместо сигнала UART. Поэтому строка,
+         * которая должна была сделать вывод двунаправленным, сама рвала
+         * маршрутизацию: канал не слышал даже собственную передачу.
+         * Сначала задаём режим пада, и только потом заводим оба сигнала
+         * UART — тогда их уже некому перебить. */
+        const gpio_num_t pin = (gpio_num_t)cfg->tx_gpio;
         uart_set_mode(port, UART_MODE_UART);
-        gpio_set_direction((gpio_num_t)cfg->tx_gpio, GPIO_MODE_INPUT_OUTPUT_OD);
+        gpio_set_direction(pin, GPIO_MODE_INPUT_OUTPUT_OD);
+        /* Открытый сток тянет только вниз; вверх линию поднимает подтяжка.
+         * Внешняя предпочтительнее, внутренняя (~45 кОм) — подстраховка. */
+        gpio_set_pull_mode(pin, GPIO_PULLUP_ONLY);
+        esp_rom_gpio_connect_out_signal(pin, UART_PERIPH_SIGNAL(port, SOC_UART_TX_PIN_IDX), false, false);
+        /* inv=false: инверсию уже задал uart_set_line_inverse() на уровне
+         * периферии, второй раз инвертировать значит не инвертировать. */
+        esp_rom_gpio_connect_in_signal(pin, UART_PERIPH_SIGNAL(port, SOC_UART_RX_PIN_IDX), false);
+        ESP_LOGW(TAG, "%s: single-wire on GPIO%d (rx_gpio ignored in this mode)",
+                 cfg->name, cfg->tx_gpio);
     } else {
         uart_set_mode(port, UART_MODE_UART);
     }
