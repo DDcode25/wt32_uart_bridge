@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="ru">
+<html lang="uk">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -116,7 +116,7 @@ input.port{width:90px}
 <body>
 <header>
   <h1>🛩️ UART⇄Ethernet Bridge</h1>
-  <span id="linkbadge" title="Открыть настройки сети">…</span>
+  <span id="linkbadge" title="Відкрити налаштування мережі">…</span>
   <span id="chbadges"></span>
   <span style="margin-left:auto;color:var(--mut);font-size:12px" id="ipinfo"></span>
 </header>
@@ -136,141 +136,141 @@ input.port{width:90px}
 <div class="page on" id="p-dash">
   <div class="card"><h2>Система</h2><table id="systab"></table></div>
   <div class="card"><h2>Ethernet</h2><table id="ethtab"></table></div>
-  <div class="card"><h2>Каналы</h2><div id="chsummary"></div></div>
-  <div class="card"><h2>Готовые профили</h2>
-    <div class="warnbox">Профиль перезаписывает протоколы, скорости и сетевые режимы затронутых каналов.
-    Какие именно каналы затронуты — зависит от профиля, см. описание ниже. GPIO, адрес платы и пароль не меняются.</div>
+  <div class="card"><h2>Канали</h2><div id="chsummary"></div></div>
+  <div class="card"><h2>Готові профілі</h2>
+    <div class="warnbox">Профіль перезаписує протоколи, швидкості та мережеві режими задіяних каналів.
+    Які саме канали задіяні — залежить від профілю, див. опис нижче. GPIO, адреса плати та пароль не змінюються.</div>
     <div class="row" id="profbtns">
       <button class="act ghost" data-prof="1" onclick="applyProfile(1)">A — Sine.Link/Centurion</button>
       <button class="act ghost" data-prof="2" onclick="applyProfile(2)">B — Mission Planner</button>
       <button class="act ghost" data-prof="3" onclick="applyProfile(3)">C — RadioMaster TX16S</button>
-      <button class="act ghost" data-prof="4" onclick="applyProfile(4)">D — Универсальный мост</button>
+      <button class="act ghost" data-prof="4" onclick="applyProfile(4)">D — Універсальний міст</button>
     </div>
     <div id="profdesc"></div>
   </div>
 </div>
 
 <div class="page" id="p-net">
-  <div class="card"><h2>Сеть</h2>
-    <div class="warnbox">Изменение IP применяется после перезагрузки. Если адрес задан неверно, доступ к конфигуратору будет потерян — потребуется factory reset через serial.</div>
-    <div class="row"><label>Режим адреса</label>
-      <select id="n_dhcp"><option value="1">DHCP</option><option value="0">Статический IP</option></select></div>
+  <div class="card"><h2>Мережа</h2>
+    <div class="warnbox">Зміна IP застосовується після перезавантаження. Якщо адресу задано неправильно, доступ до конфігуратора буде втрачено — знадобиться factory reset через serial.</div>
+    <div class="row"><label>Режим адреси</label>
+      <select id="n_dhcp"><option value="1">DHCP</option><option value="0">Статична IP-адреса</option></select></div>
     <div class="row"><label>Hostname / mDNS</label><input id="n_host" maxlength="31"></div>
-    <div class="row"><span class="hint" style="margin-left:190px">Доступ по имени: hostname.local</span></div>
-    <div class="row"><label>IP-адрес</label><input id="n_ip"></div>
-    <div class="row"><label>Маска подсети</label><input id="n_mask"></div>
+    <div class="row"><span class="hint" style="margin-left:190px">Доступ за іменем: hostname.local</span></div>
+    <div class="row"><label>IP-адреса</label><input id="n_ip"></div>
+    <div class="row"><label>Маска підмережі</label><input id="n_mask"></div>
     <div class="row"><label>Шлюз</label><input id="n_gw"></div>
     <div class="row"><label>DNS</label><input id="n_dns"></div>
-    <div class="row"><label>mDNS включён</label><input type="checkbox" id="n_mdns"></div>
+    <div class="row"><label>mDNS увімкнено</label><input type="checkbox" id="n_mdns"></div>
   </div>
-  <button class="act" onclick="save()">Сохранить</button>
+  <button class="act" onclick="save()">Зберегти</button>
 </div>
 
-<div class="page" id="p-u1"><div id="form-1"></div><button class="act" onclick="save()">Сохранить</button></div>
-<div class="page" id="p-u2"><div id="form-2"></div><button class="act" onclick="save()">Сохранить</button></div>
-<div class="page" id="p-u0"><div id="form-0"></div><button class="act" onclick="save()">Сохранить</button></div>
+<div class="page" id="p-u1"><div id="form-1"></div><button class="act" onclick="save()">Зберегти</button></div>
+<div class="page" id="p-u2"><div id="form-2"></div><button class="act" onclick="save()">Зберегти</button></div>
+<div class="page" id="p-u0"><div id="form-0"></div><button class="act" onclick="save()">Зберегти</button></div>
 
 <div class="page" id="p-proto">
-  <div class="card"><h2>Протоколы по каналам</h2>
-    <div class="warnbox">RAW Transparent не изменяет байты вообще. Остальные режимы также передают поток без изменений — разбор используется только для статистики и отображения каналов.</div>
+  <div class="card"><h2>Протоколи по каналах</h2>
+    <div class="warnbox">RAW Transparent не змінює байти взагалі. Інші режими так само передають потік без змін — розбір використовується лише для статистики та відображення каналів.</div>
     <div id="protoforms"></div>
   </div>
-  <button class="act" onclick="save()">Сохранить</button>
+  <button class="act" onclick="save()">Зберегти</button>
 </div>
 
 <div class="page" id="p-route">
-  <div class="card"><h2>Направления передачи</h2>
-    <div class="warnbox">Можно сделать канал однонаправленным, отключив одно из направлений (например, только телеметрия наружу).</div>
+  <div class="card"><h2>Напрямки передавання</h2>
+    <div class="warnbox">Канал можна зробити односпрямованим, вимкнувши один із напрямків (наприклад, лише телеметрія назовні).</div>
     <div id="routeforms"></div>
   </div>
-  <button class="act" onclick="save()">Сохранить</button>
+  <button class="act" onclick="save()">Зберегти</button>
 </div>
 
 <div class="page" id="p-diag">
-  <div class="card"><h2>Диагностика каналов</h2><div id="diagdetail"></div></div>
-  <div class="card"><h2>Логирование</h2>
-    <div class="row"><label>Подробный лог</label><input type="checkbox" id="d_verbose"></div>
-    <div class="row"><span class="hint" style="margin-left:190px">По умолчанию выключен. Поднимает порог логов с WARN до INFO
-    и включает сводку раз в 30 с. На задержку каналов в установившемся режиме практически не влияет: в путях приёма
-    и передачи логирования нет вообще. Заметен только пока UART0 остаётся консолью — тогда каждая строка блокирует
-    задачу на время передачи по проводу (~8 мс на 115200). Нагружает канал не он, а дамп трафика.</span></div>
-    <button class="act" onclick="save()">Сохранить</button>
+  <div class="card"><h2>Діагностика каналів</h2><div id="diagdetail"></div></div>
+  <div class="card"><h2>Журналювання</h2>
+    <div class="row"><label>Детальний журнал</label><input type="checkbox" id="d_verbose"></div>
+    <div class="row"><span class="hint" style="margin-left:190px">Типово вимкнений. Піднімає поріг журналу з WARN до INFO
+    і вмикає зведення раз на 30 с. На затримку каналів у сталому режимі практично не впливає: у шляхах приймання
+    та передавання журналювання немає взагалі. Помітний лише поки UART0 лишається консоллю — тоді кожен рядок блокує
+    задачу на час передавання дротом (~8 мс на 115200). Навантажує канал не він, а дамп трафіку.</span></div>
+    <button class="act" onclick="save()">Зберегти</button>
   </div>
-  <div class="card"><h2>Дамп трафика</h2>
-    <p class="hint" style="margin:0 0 10px">Пишет байты канала в лог ниже. <b>Не сохраняется</b> —
-    после перезагрузки платы всегда выключен, кнопка «Сохранить» на него не влияет.
-    Поток прорежен: не чаще строки в 100 мс на направление, до 32 байт, число пропущенных
-    порций указывается в квадратных скобках. Включённый дамп нагружает лог и вытесняет из него остальное.</p>
+  <div class="card"><h2>Дамп трафіку</h2>
+    <p class="hint" style="margin:0 0 10px">Пише байти каналу в журнал нижче. <b>Не зберігається</b> —
+    після перезавантаження плати завжди вимкнений, кнопка «Зберегти» на нього не впливає.
+    Потік проріджено: не частіше за рядок на 100 мс у кожному напрямку, до 32 байтів, кількість пропущених
+    порцій зазначається у квадратних дужках. Увімкнений дамп навантажує журнал і витісняє з нього решту.</p>
     <div id="dumptoggles"></div>
   </div>
-  <div class="card"><h2>Лог устройства</h2>
-    <p class="hint" style="margin:0 0 10px">Serial-консоль замолкает, как только канал AUX забирает UART0 — тогда это
-    единственный способ прочитать лог. Начало (старт каналов, передача UART0, получение адреса)
-    закреплено и не вытесняется, далее идут свежие записи.</p>
-    <button class="act ghost" onclick="loadLog()">Обновить</button>
+  <div class="card"><h2>Журнал пристрою</h2>
+    <p class="hint" style="margin:0 0 10px">Serial-консоль замовкає, щойно канал AUX забирає UART0 — тоді це
+    єдиний спосіб прочитати журнал. Початок (старт каналів, передавання UART0, отримання адреси)
+    закріплено й не витісняється, далі йдуть свіжі записи.</p>
+    <button class="act ghost" onclick="loadLog()">Оновити</button>
     <pre id="logbox" style="background:#0d1015;border:1px solid var(--line);border-radius:6px;padding:10px;
       margin:10px 0 0;max-height:380px;overflow:auto;font-size:12px;line-height:1.45;
-      white-space:pre-wrap;word-break:break-word;color:var(--mut)">нажмите «Обновить»</pre>
+      white-space:pre-wrap;word-break:break-word;color:var(--mut)">натисніть «Оновити»</pre>
   </div>
-  <div class="card"><h2>API устройства</h2>
-    <p class="hint" style="margin:0 0 10px">GET открывается по ссылке в новой вкладке.
-    POST вызывается этим интерфейсом или вручную, тело — JSON.</p>
+  <div class="card"><h2>API пристрою</h2>
+    <p class="hint" style="margin:0 0 10px">GET відкривається за посиланням у новій вкладці.
+    POST викликається цим інтерфейсом або вручну, тіло — JSON.</p>
     <table class="api">
       <tr><td>GET</td><td><a href="/" target="_blank">/</a></td>
-          <td>Этот web-интерфейс</td></tr>
+          <td>Цей web-інтерфейс</td></tr>
       <tr><td>GET</td><td><a href="/api/status" target="_blank">/api/status</a></td>
-          <td>Снимок состояния: система, Ethernet, каналы, счётчики протоколов</td></tr>
+          <td>Знімок стану: система, Ethernet, канали, лічильники протоколів</td></tr>
       <tr><td>GET</td><td><a href="/api/log" target="_blank">/api/log</a></td>
-          <td>Лог устройства: закреплённое начало и свежие записи</td></tr>
+          <td>Журнал пристрою: закріплений початок і свіжі записи</td></tr>
       <tr><td>GET</td><td><a href="/api/config" target="_blank">/api/config</a></td>
-          <td>Текущая конфигурация в JSON</td></tr>
+          <td>Поточна конфігурація в JSON</td></tr>
       <tr><td>POST</td><td>/api/config</td>
-          <td>Записать конфигурацию. Тело — тот же JSON, что отдаёт GET</td></tr>
+          <td>Записати конфігурацію. Тіло — той самий JSON, що віддає GET</td></tr>
       <tr><td>POST</td><td>/api/profile</td>
-          <td><code>{"profile":1}</code> — профили A–D, значения 1…4</td></tr>
+          <td><code>{"profile":1}</code> — профілі A–D, значення 1…4</td></tr>
       <tr><td>POST</td><td>/api/password</td>
-          <td><code>{"password":"…"}</code>, минимум 8 символов</td></tr>
+          <td><code>{"password":"…"}</code>, мінімум 8 символів</td></tr>
       <tr><td>POST</td><td>/api/reboot</td>
-          <td>Перезагрузка устройства, тело не требуется</td></tr>
+          <td>Перезавантаження пристрою, тіло не потрібне</td></tr>
       <tr><td>POST</td><td>/api/factory</td>
-          <td><code>{"confirm":"ERASE"}</code> — сброс к заводским настройкам</td></tr>
+          <td><code>{"confirm":"ERASE"}</code> — скидання до заводських налаштувань</td></tr>
       <tr><td>POST</td><td>/api/dump</td>
-          <td><code>{"channel":0..2,"enabled":true}</code> — дамп трафика канала.
-              Не сохраняется в NVS, после перезагрузки всегда выключен</td></tr>
+          <td><code>{"channel":0..2,"enabled":true}</code> — дамп трафіку каналу.
+              Не зберігається в NVS, після перезавантаження завжди вимкнений</td></tr>
       <tr><td>POST</td><td>/api/ota</td>
-          <td>Обновление прошивки. Тело — сырой <code>firmware.bin</code>,
-              не JSON и не multipart. Объединённый образ будет отвергнут</td></tr>
+          <td>Оновлення прошивки. Тіло — сирий <code>firmware.bin</code>,
+              не JSON і не multipart. Об’єднаний образ буде відхилено</td></tr>
     </table>
   </div>
 </div>
 
 <div class="page" id="p-fw">
-  <div class="card"><h2>О прошивке</h2><table id="fwtab"></table></div>
-  <div class="card"><h2>Конфигурация</h2>
+  <div class="card"><h2>Про прошивку</h2><table id="fwtab"></table></div>
+  <div class="card"><h2>Конфігурація</h2>
     <div class="row">
-      <button class="act ghost" onclick="exportCfg()">Экспорт JSON</button>
-      <button class="act ghost" onclick="document.getElementById('impfile').click()">Импорт JSON</button>
+      <button class="act ghost" onclick="exportCfg()">Експорт JSON</button>
+      <button class="act ghost" onclick="document.getElementById('impfile').click()">Імпорт JSON</button>
       <input type="file" id="impfile" style="display:none" accept=".json" onchange="importCfg(this)">
     </div>
   </div>
-  <div class="card"><h2>Пароль web-интерфейса</h2>
-    <div class="row"><label>Новый пароль</label><input type="password" id="pw1" minlength="8"></div>
-    <div class="row"><label>Повторите</label><input type="password" id="pw2"></div>
-    <div class="row"><label>Аутентификация включена</label><input type="checkbox" id="w_auth"></div>
-    <button class="act" onclick="changePw()">Сменить пароль</button>
+  <div class="card"><h2>Пароль web-інтерфейсу</h2>
+    <div class="row"><label>Новий пароль</label><input type="password" id="pw1" minlength="8"></div>
+    <div class="row"><label>Повторіть</label><input type="password" id="pw2"></div>
+    <div class="row"><label>Автентифікація увімкнена</label><input type="checkbox" id="w_auth"></div>
+    <button class="act" onclick="changePw()">Змінити пароль</button>
   </div>
-  <div class="card"><h2>Обновление прошивки (OTA)</h2>
-    <div class="warnbox">Загружайте <b>firmware.bin</b> — только приложение.
-    Объединённый <b>firmware_merged.bin</b> не подойдёт: он содержит загрузчик
-    и таблицу разделов, и проверка образа его отвергнет.</div>
+  <div class="card"><h2>Оновлення прошивки (OTA)</h2>
+    <div class="warnbox">Завантажуйте <b>firmware.bin</b> — лише застосунок.
+    Об’єднаний <b>firmware_merged.bin</b> не підійде: він містить завантажувач
+    і таблицю розділів, і перевірка образу його відхилить.</div>
     <div class="row">
       <button class="act ghost" id="otabtn"
-        onclick="document.getElementById('otafile').click()">Выбрать файл и прошить</button>
+        onclick="document.getElementById('otafile').click()">Вибрати файл і прошити</button>
       <input type="file" id="otafile" style="display:none" accept=".bin" onchange="uploadOta(this)">
     </div>
-    <div class="row"><span class="hint" style="margin-left:0">Образ пишется в неактивный
-    слот, поэтому текущая прошивка остаётся целой до самого конца. Плата
-    перезагрузится автоматически. Не отключайте питание во время заливки.</span></div>
+    <div class="row"><span class="hint" style="margin-left:0">Образ записується в неактивний
+    слот, тому поточна прошивка лишається цілою до самого кінця. Плата
+    перезавантажиться автоматично. Не вимикайте живлення під час заливання.</span></div>
     <div id="otaprog" style="display:none;margin-top:10px">
       <div style="background:#0d1015;border:1px solid var(--line);border-radius:5px;height:8px;overflow:hidden">
         <div id="otabar" style="height:100%;width:0;background:var(--acc);transition:width .2s"></div>
@@ -278,12 +278,12 @@ input.port{width:90px}
       <div class="hint" id="otatext" style="margin-top:6px"></div>
     </div>
   </div>
-  <div class="card"><h2>Обслуживание</h2>
+  <div class="card"><h2>Обслуговування</h2>
     <div class="row">
-      <button class="act ghost" onclick="reboot()">Перезагрузка</button>
+      <button class="act ghost" onclick="reboot()">Перезавантаження</button>
       <button class="act danger" onclick="factory()">Factory reset</button>
     </div>
-    <div class="row"><span class="hint" style="margin-left:0">Factory reset требует ввода слова ERASE для подтверждения.</span></div>
+    <div class="row"><span class="hint" style="margin-left:0">Factory reset потребує введення слова ERASE для підтвердження.</span></div>
   </div>
 </div>
 
@@ -292,7 +292,7 @@ input.port{width:90px}
 
 <script>
 const PROTOS=["RAW Transparent","CRSF","S.Bus","MAVLink","S.Port / SingleWire","RS-485 RAW","S.Bus→CRSF","CRSF→MAVLink","Custom"];
-const NETMODES=["Отключено","UDP","TCP server","TCP client","UDP + TCP server"];
+const NETMODES=["Вимкнено","UDP","TCP server","TCP client","UDP + TCP server"];
 const PARITY=["None","Even","Odd"];const STOP=["1","1.5","2"];const DUPLEX=["Full duplex","Half / single-wire","RS-485 half-duplex"];
 let cfg=null;
 
@@ -314,20 +314,20 @@ async function setDump(ch,on){
   try{
     const r=await fetch('/api/dump',{method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({channel:ch,enabled:on})});
-    if(!r.ok){toast('не удалось переключить дамп',1);return;}
-    toast(`дамп канала ${ch}: ${on?'включён':'выключен'}`);
+    if(!r.ok){toast('не вдалося перемкнути дамп',1);return;}
+    toast(`дамп каналу ${ch}: ${on?'увімкнено':'вимкнено'}`);
     if(on)setTimeout(loadLog,400);
-  }catch(e){toast('нет связи с устройством',1);}
+  }catch(e){toast('немає зв’язку з пристроєм',1);}
 }
 
 /* textContent, а не innerHTML: в лог попадает произвольный текст с устройства. */
 async function loadLog(){
   const box=document.getElementById('logbox');
-  box.textContent='загрузка…';
+  box.textContent='завантаження…';
   try{
     const r=await fetch('/api/log');
-    box.textContent=r.ok?await r.text():'ошибка '+r.status;
-  }catch(e){box.textContent='нет связи с устройством';}
+    box.textContent=r.ok?await r.text():'помилка '+r.status;
+  }catch(e){box.textContent='немає зв’язку з пристроєм';}
   box.scrollTop=box.scrollHeight;
 }
 
@@ -335,28 +335,28 @@ async function loadLog(){
    Важное отличие профилей: A и D переписывают все три канала, а B и C
    трогают только часть — остальные остаются как были. */
 const PROFDESC={
- 1:{t:'A — Sine.Link/Centurion',c:'Переписывает все три канала',
-    r:[['UART1','CRSF, 400000 бод, инверсия RX','UDP 14555'],
+ 1:{t:'A — Sine.Link/Centurion',c:'Перезаписує всі три канали',
+    r:[['UART1','CRSF, 400000 бод, інверсія RX','UDP 14555'],
        ['UART2','MAVLink, 115200 бод','UDP 14550 + TCP 1310'],
        ['UART0/AUX','RAW','UDP 14560']]},
- 2:{t:'B — Mission Planner',c:'Меняет только UART2, остальные каналы не трогает',
-    r:[['UART2','MAVLink, 115200 бод','UDP 14550 + TCP 1310, обмен в обе стороны, fan-out выключен']]},
- 3:{t:'C — RadioMaster TX16S',c:'Меняет UART1 и UART2, канал AUX не трогает',
-    r:[['UART1','CRSF, 400000 бод, инверсия RX, watchdog 500 мс','UDP 14555'],
+ 2:{t:'B — Mission Planner',c:'Змінює лише UART2, інші канали не чіпає',
+    r:[['UART2','MAVLink, 115200 бод','UDP 14550 + TCP 1310, обмін в обидва боки, fan-out вимкнено']]},
+ 3:{t:'C — RadioMaster TX16S',c:'Змінює UART1 і UART2, канал AUX не чіпає',
+    r:[['UART1','CRSF, 400000 бод, інверсія RX, watchdog 500 мс','UDP 14555'],
        ['UART2','MAVLink, 57600 бод','UDP 14550, без TCP']]},
- 4:{t:'D — Универсальный мост',c:'Переписывает все три канала, без разбора протоколов',
+ 4:{t:'D — Універсальний міст',c:'Перезаписує всі три канали, без розбору протоколів',
     r:[['UART0/AUX','RAW','UDP 14550'],
        ['UART1','RAW','UDP 14560'],
        ['UART2','RAW','UDP 14570']]}};
 
 function showProf(n){
   const d=document.getElementById('profdesc');
-  if(!n){d.innerHTML='<span class="hint">Наведите на профиль, чтобы увидеть, что он изменит.</span>';return;}
+  if(!n){d.innerHTML='<span class="hint">Наведіть на профіль, щоб побачити, що він змінить.</span>';return;}
   const p=PROFDESC[n];
   d.innerHTML=`<div class="profcard"><b>${p.t}</b> — ${p.c}
-    <table class="proftab"><tr><th>Канал</th><th>Порт</th><th>Сеть</th></tr>`+
+    <table class="proftab"><tr><th>Канал</th><th>Порт</th><th>Мережа</th></tr>`+
     p.r.map(x=>`<tr><td>${x[0]}</td><td>${x[1]}</td><td>${x[2]}</td></tr>`).join('')+
-    `</table><span class="hint">Изменения применяются сразу и сохраняются в NVS.</span></div>`;
+    `</table><span class="hint">Зміни застосовуються одразу й зберігаються в NVS.</span></div>`;
 }
 document.querySelectorAll('#profbtns button').forEach(b=>{
   const n=+b.dataset.prof;
@@ -373,39 +373,39 @@ function opts(arr,sel){return arr.map((v,i)=>`<option value="${i}"${i==sel?' sel
 
 function uartForm(c){
   const id=c.channel_id;
-  return `<div class="card"><h2>${c.name} — параметры порта</h2>
-  <div class="row"><label>Имя канала</label><input id="c${id}_name" value="${c.name}" maxlength="23"></div>
-  <div class="row"><label>Включён</label><input type="checkbox" id="c${id}_en" ${c.enabled?'checked':''}></div>
+  return `<div class="card"><h2>${c.name} — параметри порту</h2>
+  <div class="row"><label>Ім’я каналу</label><input id="c${id}_name" value="${c.name}" maxlength="23"></div>
+  <div class="row"><label>Увімкнено</label><input type="checkbox" id="c${id}_en" ${c.enabled?'checked':''}></div>
   <div class="row"><label>RX GPIO</label><input type="number" id="c${id}_rx" value="${c.rx_gpio}" min="0" max="39"></div>
   <div class="row"><label>TX GPIO</label><input type="number" id="c${id}_tx" value="${c.tx_gpio}" min="0" max="33"></div>
-  <div class="row"><span class="hint">Не используйте 0,16,18,19,21,22,23,25,26,27 (Ethernet) и 1,3 (консоль). GPIO34-39 — только вход.</span></div>
-  <div class="row"><label>Скорость, бод</label><input type="number" id="c${id}_baud" value="${c.baud_rate}" min="9600" max="5000000"></div>
-  <div class="row"><label>Бит данных</label><select id="c${id}_db">${[5,6,7,8].map((v,i)=>`<option value="${i}"${i==c.data_bits?' selected':''}>${v}</option>`).join('')}</select></div>
-  <div class="row"><label>Чётность</label><select id="c${id}_par">${opts(PARITY,c.parity)}</select></div>
-  <div class="row"><label>Стоп-биты</label><select id="c${id}_sb">${opts(STOP,c.stop_bits)}</select></div>
-  <div class="row"><label>Инверсия RX</label><input type="checkbox" id="c${id}_irx" ${c.invert_rx?'checked':''}></div>
-  <div class="row"><label>Инверсия TX</label><input type="checkbox" id="c${id}_itx" ${c.invert_tx?'checked':''}></div>
-  <div class="row"><span class="hint">S.Bus обычно требует инверсии: 100000 бод, 8E2, инверсия RX и TX.</span></div>
+  <div class="row"><span class="hint">Не використовуйте 0,16,18,19,21,22,23,25,26,27 (Ethernet) та 1,3 (консоль). GPIO34-39 — лише вхід.</span></div>
+  <div class="row"><label>Швидкість, бод</label><input type="number" id="c${id}_baud" value="${c.baud_rate}" min="9600" max="5000000"></div>
+  <div class="row"><label>Біт даних</label><select id="c${id}_db">${[5,6,7,8].map((v,i)=>`<option value="${i}"${i==c.data_bits?' selected':''}>${v}</option>`).join('')}</select></div>
+  <div class="row"><label>Парність</label><select id="c${id}_par">${opts(PARITY,c.parity)}</select></div>
+  <div class="row"><label>Стоп-біти</label><select id="c${id}_sb">${opts(STOP,c.stop_bits)}</select></div>
+  <div class="row"><label>Інверсія RX</label><input type="checkbox" id="c${id}_irx" ${c.invert_rx?'checked':''}></div>
+  <div class="row"><label>Інверсія TX</label><input type="checkbox" id="c${id}_itx" ${c.invert_tx?'checked':''}></div>
+  <div class="row"><span class="hint">S.Bus зазвичай потребує інверсії: 100000 бод, 8E2, інверсія RX і TX.</span></div>
   <div class="row"><label>Дуплекс</label><select id="c${id}_dup">${opts(DUPLEX,c.duplex)}</select></div>
   <div class="row"><label>RS-485 DE GPIO</label><input type="number" id="c${id}_de" value="${c.rs485_de_gpio}" min="-1" max="33"></div>
   <div class="row"><label>RS-485 /RE GPIO</label><input type="number" id="c${id}_re" value="${c.rs485_re_gpio}" min="-1" max="33"></div>
-  <div class="row"><span class="hint">-1 = не используется. Не подключайте RS-485 напрямую к GPIO, нужен трансивер.</span></div>
+  <div class="row"><span class="hint">-1 = не використовується. Не під’єднуйте RS-485 напряму до GPIO, потрібен трансивер.</span></div>
   <div class="row"><label>RX watchdog, мс</label><input type="number" id="c${id}_wd" value="${c.rx_watchdog_timeout_ms}" min="0" max="60000"></div>
-  <div class="row"><span class="hint">0 = отключён. При отсутствии данных дольше таймаута канал помечается как потерянный.</span></div>
+  <div class="row"><span class="hint">0 = вимкнено. Якщо даних немає довше за таймаут, канал позначається як втрачений.</span></div>
   </div>
-  <div class="card"><h2>${c.name} — сеть</h2>
-  <div class="row"><label>Сетевой режим</label><select id="c${id}_mode">${opts(NETMODES,c.net_mode)}</select></div>
+  <div class="card"><h2>${c.name} — мережа</h2>
+  <div class="row"><label>Мережевий режим</label><select id="c${id}_mode">${opts(NETMODES,c.net_mode)}</select></div>
   <div class="row"><label>UDP listen порт</label><input type="number" id="c${id}_ulp" value="${c.udp_listen_port}" min="0" max="65535"></div>
   <div class="row"><label>TCP server порт</label><input type="number" id="c${id}_tsp" value="${c.tcp_server_port}" min="0" max="65535"></div>
-  <div class="row"><label>Макс. TCP клиентов</label><input type="number" id="c${id}_mtc" value="${c.max_tcp_clients}" min="1" max="4"></div>
-  <div class="row"><label>Принимать с любого IP</label><input type="checkbox" id="c${id}_any" ${c.allow_any_source?'checked':''}></div>
-  <div class="row"><span class="hint">Отключите, чтобы принимать управляющий трафик только с доверенного адреса.</span></div>
+  <div class="row"><label>Макс. TCP клієнтів</label><input type="number" id="c${id}_mtc" value="${c.max_tcp_clients}" min="1" max="4"></div>
+  <div class="row"><label>Приймати з будь-якої IP</label><input type="checkbox" id="c${id}_any" ${c.allow_any_source?'checked':''}></div>
+  <div class="row"><span class="hint">Вимкніть, щоб приймати керувальний трафік лише з довіреної адреси.</span></div>
   <h2 style="margin-top:14px">UDP destinations (fan-out)</h2>
   ${c.udp_destinations.map((d,i)=>`<div class="row"><label>Адресат ${i+1}</label>
     <input class="ip" id="c${id}_d${i}_ip" value="${d.ip}">
     <input class="port" type="number" id="c${id}_d${i}_p" value="${d.port}" min="0" max="65535">
     <input type="checkbox" id="c${id}_d${i}_e" ${d.enabled?'checked':''}></div>`).join('')}
-  <div class="row"><span class="hint">Если ни один адресат не включён, ответы уходят на адрес последнего входящего пакета.</span></div>
+  <div class="row"><span class="hint">Якщо жодного адресата не ввімкнено, відповіді йдуть на адресу останнього вхідного пакета.</span></div>
   </div>`;
 }
 
@@ -429,8 +429,8 @@ function render(){
     `<div class="row"><label>${c.name}</label><select id="c${c.channel_id}_proto">${opts(PROTOS,c.protocol)}</select></div>`).join('');
   document.getElementById('routeforms').innerHTML=cfg.channels.map(c=>
     `<div class="row"><label>${c.name}</label>
-     <label style="flex:0 0 auto"><input type="checkbox" id="c${c.channel_id}_u2n" ${c.uart_to_net?'checked':''}> UART→сеть</label>
-     <label style="flex:0 0 auto"><input type="checkbox" id="c${c.channel_id}_n2u" ${c.net_to_uart?'checked':''}> сеть→UART</label></div>`).join('');
+     <label style="flex:0 0 auto"><input type="checkbox" id="c${c.channel_id}_u2n" ${c.uart_to_net?'checked':''}> UART→мережа</label>
+     <label style="flex:0 0 auto"><input type="checkbox" id="c${c.channel_id}_n2u" ${c.net_to_uart?'checked':''}> мережа→UART</label></div>`).join('');
 }
 
 function collect(){
@@ -466,37 +466,37 @@ function collect(){
 
 async function loadCfg(){
   const r=await fetch('/api/config');
-  if(!r.ok){toast('Ошибка загрузки конфигурации',1);return;}
+  if(!r.ok){toast('Помилка завантаження конфігурації',1);return;}
   cfg=await r.json();render();
 }
 async function save(){
   collect();
   const r=await fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(cfg)});
-  toast(r.ok?'Сохранено. Часть параметров применится после перезагрузки.':'Ошибка сохранения',!r.ok);
+  toast(r.ok?'Збережено. Частина параметрів застосується після перезавантаження.':'Помилка збереження',!r.ok);
 }
 async function applyProfile(p){
   /* Сводку кладём прямо в диалог: на сенсорном экране наведения нет,
      и панель с описанием пользователь бы не увидел. */
   const d=PROFDESC[p];
   const what=d?`\n\n${d.t}\n${d.c}.\n\n`+d.r.map(x=>`${x[0]}: ${x[1]} -> ${x[2]}`).join('\n')+'\n':'';
-  if(!confirm(`Применить профиль?${what}\nТекущие настройки протоколов и портов будут перезаписаны.`))return;
+  if(!confirm(`Застосувати профіль?${what}\nПоточні налаштування протоколів і портів буде перезаписано.`))return;
   const r=await fetch('/api/profile',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({profile:p})});
-  if(r.ok){toast('Профиль применён');loadCfg();}else toast('Ошибка',1);
+  if(r.ok){toast('Профіль застосовано');loadCfg();}else toast('Помилка',1);
 }
-async function reboot(){if(confirm('Перезагрузить устройство?'))
-  {await fetch('/api/reboot',{method:'POST'});toast('Перезагрузка…');}}
+async function reboot(){if(confirm('Перезавантажити пристрій?'))
+  {await fetch('/api/reboot',{method:'POST'});toast('Перезавантаження…');}}
 async function factory(){
-  const v=prompt('Это сотрёт ВСЕ настройки. Введите ERASE для подтверждения:');
-  if(v!=='ERASE'){toast('Отменено');return;}
+  const v=prompt('Це зітре ВСІ налаштування. Введіть ERASE для підтвердження:');
+  if(v!=='ERASE'){toast('Скасовано');return;}
   const r=await fetch('/api/factory',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({confirm:'ERASE'})});
-  toast(r.ok?'Factory reset выполнен, перезагрузка…':'Ошибка',!r.ok);
+  toast(r.ok?'Factory reset виконано, перезавантаження…':'Помилка',!r.ok);
 }
 async function changePw(){
   const a=document.getElementById('pw1').value,b=document.getElementById('pw2').value;
-  if(a.length<8){toast('Минимум 8 символов',1);return;}
-  if(a!==b){toast('Пароли не совпадают',1);return;}
+  if(a.length<8){toast('Мінімум 8 символів',1);return;}
+  if(a!==b){toast('Паролі не збігаються',1);return;}
   const r=await fetch('/api/password',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password:a})});
-  toast(r.ok?'Пароль изменён':'Ошибка',!r.ok);
+  toast(r.ok?'Пароль змінено':'Помилка',!r.ok);
   document.getElementById('pw1').value='';document.getElementById('pw2').value='';
 }
 /* XMLHttpRequest, а не fetch: у fetch нет прогресса отправки, а заливка
@@ -504,25 +504,25 @@ async function changePw(){
 function uploadOta(inp){
   const f=inp.files[0];inp.value='';
   if(!f)return;
-  if(!confirm(`Прошить «${f.name}» (${f.size} Б)?\nПлата перезагрузится.`))return;
+  if(!confirm(`Прошити «${f.name}» (${f.size} Б)?\nПлата перезавантажиться.`))return;
   const prog=document.getElementById('otaprog'),bar=document.getElementById('otabar'),
         txt=document.getElementById('otatext'),btn=document.getElementById('otabtn');
   prog.style.display='block';btn.disabled=true;bar.style.width='0';
-  txt.textContent='передача…';
+  txt.textContent='передавання…';
   const x=new XMLHttpRequest();
   x.open('POST','/api/ota');
   x.upload.onprogress=e=>{if(!e.lengthComputable)return;
     const p=Math.round(e.loaded/e.total*100);bar.style.width=p+'%';
-    txt.textContent=`отправлено ${p}% (${e.loaded} из ${e.total} Б)`;};
+    txt.textContent=`надіслано ${p}% (${e.loaded} з ${e.total} Б)`;};
   x.onload=()=>{btn.disabled=false;
     if(x.status===200){bar.style.width='100%';
-      txt.textContent='образ принят и проверен, плата перезагружается…';
-      toast('Прошивка загружена, идёт перезагрузка');
+      txt.textContent='образ прийнято й перевірено, плата перезавантажується…';
+      toast('Прошивку завантажено, триває перезавантаження');
       setTimeout(()=>location.reload(),12000);
-    }else{txt.textContent=`ошибка ${x.status}: ${x.responseText||'без описания'}`;
-      toast('OTA не удалась',1);}};
-  x.onerror=()=>{btn.disabled=false;txt.textContent='обрыв связи при передаче';
-    toast('OTA не удалась',1);};
+    }else{txt.textContent=`помилка ${x.status}: ${x.responseText||'без опису'}`;
+      toast('OTA не вдалася',1);}};
+  x.onerror=()=>{btn.disabled=false;txt.textContent='обрив зв’язку під час передавання';
+    toast('OTA не вдалася',1);};
   x.send(f);
 }
 
@@ -537,13 +537,13 @@ function importCfg(inp){
   rd.onload=async()=>{
     try{const j=JSON.parse(rd.result);
       const r=await fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(j)});
-      if(r.ok){toast('Импортировано');loadCfg();}else toast('Ошибка импорта',1);
-    }catch(e){toast('Некорректный JSON',1);}
+      if(r.ok){toast('Імпортовано');loadCfg();}else toast('Помилка імпорту',1);
+    }catch(e){toast('Некоректний JSON',1);}
   };rd.readAsText(f);
 }
 
 function row(k,v){return `<tr><td>${k}</td><td>${v}</td></tr>`;}
-function num(n){return (n||0).toLocaleString('ru-RU');}
+function num(n){return (n||0).toLocaleString('uk-UA');}
 /* Имя канала задаётся через /api/config, то есть приходит извне.
    В атрибут title кавычка в имени вставила бы свой атрибут. */
 function esc(t){return String(t).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
@@ -557,45 +557,45 @@ async function poll(){
     const badge=document.getElementById('linkbadge');
     badge.textContent=s.ethernet.link_up?`ETH ${s.ethernet.link_speed_mbps}M ${s.ethernet.full_duplex?'FD':'HD'}`:'ETH DOWN';
     badge.className=s.ethernet.link_up?'up':'down';
-    document.getElementById('ipinfo').textContent=s.ethernet.got_ip?s.ethernet.ip:'нет IP';
+    document.getElementById('ipinfo').textContent=s.ethernet.got_ip?s.ethernet.ip:'немає IP';
 
     document.getElementById('systab').innerHTML=
-      row('Uptime',fmtUp(s.system.uptime_ms))+row('Причина перезагрузки',s.system.reset_reason)+
-      row('Свободная память',s.system.free_heap+' b')+row('Минимум за сессию',s.system.min_free_heap+' b');
+      row('Uptime',fmtUp(s.system.uptime_ms))+row('Причина перезавантаження',s.system.reset_reason)+
+      row('Вільна пам’ять',s.system.free_heap+' b')+row('Мінімум за сесію',s.system.min_free_heap+' b');
     document.getElementById('ethtab').innerHTML=
       row('Link',s.ethernet.link_up?'<span class="ok">UP</span>':'<span class="err">DOWN</span>')+
       row('MAC',s.ethernet.mac)+row('IP',s.ethernet.ip)+row('Маска',s.ethernet.netmask)+
-      row('Шлюз',s.ethernet.gateway)+row('Скорость',s.ethernet.link_speed_mbps+' Мбит/с')+
+      row('Шлюз',s.ethernet.gateway)+row('Швидкість',s.ethernet.link_speed_mbps+' Мбіт/с')+
       row('Link up/down',s.ethernet.link_up_count+' / '+s.ethernet.link_down_count);
     document.getElementById('fwtab').innerHTML=
-      row('Версия прошивки',`<b>${s.system.firmware_version}</b>`)+
-      row('Собрана',`${s.system.build_date} ${s.system.build_time}`)+
-      row('Проект',s.system.project_name)+
-      row('Загружена из раздела',
+      row('Версія прошивки',`<b>${s.system.firmware_version}</b>`)+
+      row('Зібрано',`${s.system.build_date} ${s.system.build_time}`)+
+      row('Проєкт',s.system.project_name)+
+      row('Завантажено з розділу',
           `${s.system.partition} @ 0x${(s.system.partition_addr>>>0).toString(16)}`)+
       row('ELF SHA-256',s.system.elf_sha256)+
       row('ESP-IDF',s.system.idf_version)+
-      row('Схема конфигурации','v'+(cfg?cfg.schema_version:'?'));
+      row('Схема конфігурації','v'+(cfg?cfg.schema_version:'?'));
 
     document.getElementById('chbadges').innerHTML=s.channels
       .slice().sort((a,b)=>a.channel_id-b.channel_id).map(c=>{
         const cls=!c.enabled?'':(c.alive?'on':'idle');
-        const st=!c.enabled?'выключен':(c.alive?'активен':'нет данных');
-        return `<span class="chbadge ${cls}" title="${esc(c.name)} — ${st}. Открыть настройки"
+        const st=!c.enabled?'вимкнено':(c.alive?'активний':'немає даних');
+        return `<span class="chbadge ${cls}" title="${esc(c.name)} — ${st}. Відкрити налаштування"
                       onclick="goTab('u${c.channel_id}')">U${c.channel_id}</span>`;
       }).join('');
 
     document.getElementById('chsummary').innerHTML=s.channels.map(c=>
       `<div class="chblock">
          <b>${esc(c.name)}</b> — ${PROTOS[c.protocol]}, ${c.baud_rate} бод, GPIO rx${c.rx_gpio}/tx${c.tx_gpio}
-         ${c.enabled?(c.alive?'<span class="ok">активен</span>':'<span class="warn">нет данных</span>'):'<span class="err">выключен</span>'}
+         ${c.enabled?(c.alive?'<span class="ok">активний</span>':'<span class="warn">немає даних</span>'):'<span class="err">вимкнено</span>'}
          <table class="chtab">
            <tr><th></th><th>RX</th><th>TX</th></tr>
            <tr><td>UART</td><td>${num(c.rx_bytes)} Б</td><td>${num(c.tx_bytes)} Б</td></tr>
            <tr><td>UDP</td><td>${num(c.udp_rx_packets)} пак.</td><td>${num(c.udp_tx_packets)} пак.</td></tr>
            <tr><td>TCP</td><td>${num(c.tcp_rx_bytes)} Б</td><td>${num(c.tcp_tx_bytes)} Б</td></tr>
          </table>
-         <span class="hint">TCP клиентов: ${c.tcp_clients}${c.udp_rx_dropped?` · UDP отброшено: ${num(c.udp_rx_dropped)}`:''}${c.rx_overruns?` · <span class="err">UART overruns: ${num(c.rx_overruns)}</span>`:''}</span>
+         <span class="hint">TCP клієнтів: ${c.tcp_clients}${c.udp_rx_dropped?` · UDP відкинуто: ${num(c.udp_rx_dropped)}`:''}${c.rx_overruns?` · <span class="err">UART overruns: ${num(c.rx_overruns)}</span>`:''}</span>
        </div>`).join('');
 
     /* Состояние берём из статуса, а не из локального флага: дамп могли
@@ -609,26 +609,26 @@ async function poll(){
       let t=`<div class="card" style="background:#0d1015"><h2>${c.name}</h2><table>`+
         row('Протокол',PROTOS[c.protocol])+row('RX / TX байт',c.rx_bytes+' / '+c.tx_bytes)+
         row('UART overruns',c.rx_overruns>0?`<span class="err">${c.rx_overruns}</span>`:'0')+
-        row('UDP пакетов rx/tx',c.udp_rx_packets+' / '+c.udp_tx_packets)+
-        row('UDP отброшено',c.udp_rx_dropped)+
+        row('UDP пакетів rx/tx',c.udp_rx_packets+' / '+c.udp_tx_packets)+
+        row('UDP відкинуто',c.udp_rx_dropped)+
         row('TCP байт rx/tx',c.tcp_rx_bytes+' / '+c.tcp_tx_bytes)+
-        row('TCP клиентов',c.tcp_clients)+
-        row('Последний приём UART',c.last_rx_time_ms?c.last_rx_time_ms+' мс':'—')+
+        row('TCP клієнтів',c.tcp_clients)+
+        row('Останнє приймання UART',c.last_rx_time_ms?c.last_rx_time_ms+' мс':'—')+
         row('Watchdog',c.alive?'<span class="ok">OK</span>':'<span class="err">таймаут</span>');
-      if(c.crsf){t+=row('CRSF кадров',c.crsf.rx_frames_total)+row('CRSF кадров каналов',c.crsf.rx_frames_channels)+
-        row('CRC ошибок',c.crsf.crc_errors>0?`<span class="err">${c.crsf.crc_errors}</span>`:'0')+
-        row('Ошибок синхронизации',c.crsf.sync_errors)+row('Некорректная длина',c.crsf.bad_length_frames)+
-        row('Failsafe',c.crsf.failsafe?'<span class="err">ДА</span>':'нет')+
+      if(c.crsf){t+=row('CRSF кадрів',c.crsf.rx_frames_total)+row('CRSF кадрів каналів',c.crsf.rx_frames_channels)+
+        row('Помилок CRC',c.crsf.crc_errors>0?`<span class="err">${c.crsf.crc_errors}</span>`:'0')+
+        row('Помилок синхронізації',c.crsf.sync_errors)+row('Некоректна довжина',c.crsf.bad_length_frames)+
+        row('Failsafe',c.crsf.failsafe?'<span class="err">ТАК</span>':'ні')+
         row('Uplink LQ / RSSI / SNR',c.crsf.uplink_lq+' / '+c.crsf.uplink_rssi+' / '+c.crsf.uplink_snr);}
-      if(c.sbus){t+=row('S.Bus кадров',c.sbus.rx_frames_total)+row('Ошибок кадра',c.sbus.frame_errors)+
-        row('Failsafe',c.sbus.failsafe?'<span class="err">ДА</span>':'нет')+
-        row('Frame lost',c.sbus.frame_lost?'<span class="warn">ДА</span>':'нет')+
+      if(c.sbus){t+=row('S.Bus кадрів',c.sbus.rx_frames_total)+row('Помилок кадру',c.sbus.frame_errors)+
+        row('Failsafe',c.sbus.failsafe?'<span class="err">ТАК</span>':'ні')+
+        row('Frame lost',c.sbus.frame_lost?'<span class="warn">ТАК</span>':'ні')+
         row('CH17 / CH18',(c.sbus.ch17?'1':'0')+' / '+(c.sbus.ch18?'1':'0'));}
       if(c.mavlink){t+=row('MAVLink v1 / v2',c.mavlink.rx_frames_v1+' / '+c.mavlink.rx_frames_v2)+
-        row('Ошибок кадра',c.mavlink.frame_errors)+row('Heartbeat',c.mavlink.heartbeats)+
+        row('Помилок кадру',c.mavlink.frame_errors)+row('Heartbeat',c.mavlink.heartbeats)+
         row('sysid / compid',c.mavlink.last_sysid+' / '+c.mavlink.last_compid)+
-        row('Последний msgid',c.mavlink.last_msgid);}
-      if(c.raw){t+=row('RAW байт всего',c.raw.bytes_total);}
+        row('Останній msgid',c.mavlink.last_msgid);}
+      if(c.raw){t+=row('RAW байтів усього',c.raw.bytes_total);}
       t+='</table>';
       const chs=c.crsf?c.crsf.channels:(c.sbus?c.sbus.channels:null);
       if(chs)t+='<div style="margin-top:8px">'+chs.map((v,i)=>`<span class="ch">CH${i+1}: ${v}</span>`).join('')+'</div>';

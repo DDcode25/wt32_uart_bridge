@@ -29,6 +29,9 @@ extern const uint8_t index_html_start[] asm("_binary_index_html_start");
 extern const uint8_t index_html_end[]   asm("_binary_index_html_end");
 
 #define MAX_POST_BODY 8192
+/* Сколько подряд таймаутов приёма терпит read_body(). Штатный таймаут
+ * сокета в esp_http_server — 5 с, так что это верхняя граница ожидания. */
+#define READ_BODY_MAX_TIMEOUTS 4
 
 /* ---------------- аутентификация ---------------- */
 
@@ -89,9 +92,20 @@ static char *read_body(httpd_req_t *req)
     if (req->content_len <= 0 || req->content_len > MAX_POST_BODY) return NULL;
     char *buf = malloc(req->content_len + 1);
     if (!buf) return NULL;
+    /* Таймаут приёма — не ошибка: тело может прийти несколькими сегментами,
+     * а клиент с заголовком Expect: 100-continue ждёт ответа сервера около
+     * секунды, прежде чем начать передачу. Прежний код считал -408 отказом
+     * и отвечал "invalid body" на совершенно нормальный запрос — сохранение
+     * конфигурации срывалось на ровном месте. Число попыток ограничено,
+     * чтобы оборванное соединение не держало задачу вечно. */
     int received = 0;
+    int timeouts = 0;
     while (received < req->content_len) {
         int r = httpd_req_recv(req, buf + received, req->content_len - received);
+        if (r == HTTPD_SOCK_ERR_TIMEOUT) {
+            if (++timeouts > READ_BODY_MAX_TIMEOUTS) { free(buf); return NULL; }
+            continue;
+        }
         if (r <= 0) { free(buf); return NULL; }
         received += r;
     }

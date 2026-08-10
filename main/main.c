@@ -150,8 +150,8 @@ void app_main(void)
      * что именно не так, и продолжаем. */
     char cfg_problem[200];
     if (config_manager_validate(&s_config, cfg_problem, sizeof(cfg_problem)) != ESP_OK) {
-        ESP_LOGE(TAG, "!!! конфигурация каналов некорректна: %s", cfg_problem);
-        ESP_LOGE(TAG, "!!! исправьте назначение GPIO в web-интерфейсе");
+        ESP_LOGE(TAG, "!!! конфігурація каналів некоректна: %s", cfg_problem);
+        ESP_LOGE(TAG, "!!! виправте призначення GPIO у web-інтерфейсі");
     }
 
     diagnostics_init();

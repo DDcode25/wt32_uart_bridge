@@ -198,6 +198,8 @@ esp_err_t config_manager_validate(const app_config_t *cfg, char *reason, size_t 
 {
     static const int usable[]     = BOARD_USABLE_IO_GPIOS;
     static const int input_only[] = BOARD_INPUT_ONLY_GPIOS;
+    /* Консольні виводи дозволені свідомо, див. BOARD_CONSOLE_IO_GPIOS. */
+    static const int console_io[] = BOARD_CONSOLE_IO_GPIOS;
 
     /* owner[pin] — номер канала, уже занявшего вывод, либо -1. */
     int8_t owner[40];
@@ -208,11 +210,11 @@ esp_err_t config_manager_validate(const app_config_t *cfg, char *reason, size_t 
         if (!u->enabled) continue;   /* выключенный канал пины не держит */
 
         /* Раньше цикла: иначе одинаковые RX и TX ловятся проверкой на
-         * повторное использование и дают бессмысленное «GPIO33 занят
-         * дважды: UART1_CRSF и UART1_CRSF». */
+         * повторное использование и дают бессмысленное «GPIO33 зайнято
+         * двічі: UART1_CRSF і UART1_CRSF». */
         if (u->tx_gpio == u->rx_gpio && u->duplex != UART_DUPLEX_HALF_SINGLE_WIRE) {
             return reject(reason, reason_len,
-                "%s: RX и TX на GPIO%d вне однопроводного half-duplex",
+                "%s: RX і TX на GPIO%d поза однодротовим half-duplex",
                 u->name, u->tx_gpio);
         }
 
@@ -232,21 +234,22 @@ esp_err_t config_manager_validate(const app_config_t *cfg, char *reason, size_t 
             if (pin < 0) {
                 if (pins[k].optional) continue;   /* -1 = RS-485 не используется */
                 return reject(reason, reason_len,
-                    "%s: %s не задан (GPIO%d)", u->name, pins[k].what, pin);
+                    "%s: %s не задано (GPIO%d)", u->name, pins[k].what, pin);
             }
             if (pin >= (int)sizeof(owner)) {
                 return reject(reason, reason_len,
-                    "%s: %s GPIO%d не существует", u->name, pins[k].what, pin);
+                    "%s: %s GPIO%d не існує", u->name, pins[k].what, pin);
             }
 
-            bool ok = in_list(pin, usable, sizeof(usable) / sizeof(usable[0]));
+            bool ok = in_list(pin, usable, sizeof(usable) / sizeof(usable[0])) ||
+                      in_list(pin, console_io, sizeof(console_io) / sizeof(console_io[0]));
             if (!ok && pins[k].rx_ok) {
                 ok = in_list(pin, input_only, sizeof(input_only) / sizeof(input_only[0]));
             }
             if (!ok) {
                 return reject(reason, reason_len,
-                    "%s: GPIO%d нельзя под %s — не выведен на плату, занят Ethernet/консолью "
-                    "или только на вход", u->name, pin, pins[k].what);
+                    "%s: GPIO%d не можна під %s — не виведений на плату, зайнятий Ethernet "
+                    "або лише на вхід", u->name, pin, pins[k].what);
             }
 
             /* Один провод на приём и передачу — легальный режим, но
@@ -257,7 +260,7 @@ esp_err_t config_manager_validate(const app_config_t *cfg, char *reason, size_t 
             }
             if (owner[pin] >= 0) {
                 return reject(reason, reason_len,
-                    "GPIO%d занят дважды: %s (%s) и %s", pin, u->name, pins[k].what,
+                    "GPIO%d зайнято двічі: %s (%s) і %s", pin, u->name, pins[k].what,
                     cfg->uart[owner[pin]].name);
             }
             owner[pin] = (int8_t)i;

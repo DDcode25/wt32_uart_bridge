@@ -133,7 +133,7 @@ static void dump_bytes(uart_channel_t *ch, dump_state_t *st, const char *dir,
 
     const char *ellipsis = (show < len) ? " ..." : "";
     if (st->skipped_chunks) {
-        ESP_LOGW(TAG, "%s %s %uB: %s%s [пропущено %u порций / %u Б]",
+        ESP_LOGW(TAG, "%s %s %uB: %s%s [пропущено %u порцій / %u Б]",
                  ch->cfg.name, dir, (unsigned)len, hex, ellipsis,
                  (unsigned)st->skipped_chunks, (unsigned)st->skipped_bytes);
         st->skipped_chunks = 0;
@@ -233,6 +233,14 @@ esp_err_t uart_manager_apply_config(const uart_mgr_channel_cfg_t *cfg)
         diagnostics_capture_log();
     }
 #endif
+
+    /* Канал сел на выводы программирования. Разрешено намеренно (это
+     * родные пины UART0), но подключённое сюда устройство мешает заливке
+     * через USB-UART, а загрузочный лог ROM уходит в него же. */
+    if (cfg->rx_gpio == 1 || cfg->rx_gpio == 3 || cfg->tx_gpio == 1 || cfg->tx_gpio == 3) {
+        ESP_LOGW(TAG, "%s uses the programming pins (TX0=GPIO1 / RX0=GPIO3)", cfg->name);
+        ESP_LOGW(TAG, "disconnect the device there before flashing over USB-UART; OTA is unaffected");
+    }
 
     uart_config_t uart_cfg = {
         .baud_rate = (int)cfg->baud_rate,
