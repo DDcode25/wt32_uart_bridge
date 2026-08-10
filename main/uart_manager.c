@@ -44,6 +44,11 @@ static uart_port_t channel_to_port(uint8_t channel_id)
     }
 }
 
+/* board_config.h задаёт duplex числом (там enum не виден) — сверяем, чтобы
+ * перестановка значений в uart_duplex_t не поменяла режим UART1 молча. */
+_Static_assert(BOARD_UART1_DEFAULT_DUPLEX == UART_DUPLEX_HALF_SINGLE_WIRE,
+               "BOARD_UART1_DEFAULT_DUPLEX разошёлся с uart_duplex_t");
+
 void uart_manager_default_config(uint8_t channel_id, uart_mgr_channel_cfg_t *out_cfg)
 {
     memset(out_cfg, 0, sizeof(*out_cfg));
@@ -65,6 +70,7 @@ void uart_manager_default_config(uint8_t channel_id, uart_mgr_channel_cfg_t *out
             out_cfg->tx_gpio = BOARD_UART1_DEFAULT_TX_GPIO;
             out_cfg->baud_rate = BOARD_UART1_DEFAULT_BAUD;
             out_cfg->invert_rx = BOARD_UART1_DEFAULT_INVERT_RX ? true : false;
+            out_cfg->duplex = BOARD_UART1_DEFAULT_DUPLEX;
             out_cfg->protocol = PROTO_MODE_CRSF;
             out_cfg->rx_watchdog_timeout_ms = 500; /* низкая задержка failsafe */
             break;
@@ -288,6 +294,11 @@ esp_err_t uart_manager_apply_config(const uart_mgr_channel_cfg_t *cfg)
         uart_set_pin(port, cfg->tx_gpio, cfg->tx_gpio, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
         uart_set_mode(port, UART_MODE_UART);
         gpio_set_direction((gpio_num_t)cfg->tx_gpio, GPIO_MODE_INPUT_OUTPUT_OD);
+        /* Открытый сток тянет линию только вниз, поэтому уровень покоя
+         * держать нечем: без внешнего резистора (прямое подключение к
+         * пульту) линия висит и приём собирает мусор. Внутренней подтяжки
+         * хватает на короткий провод; на длинном нужен внешний резистор. */
+        gpio_set_pull_mode((gpio_num_t)cfg->tx_gpio, GPIO_PULLUP_ONLY);
     } else {
         uart_set_mode(port, UART_MODE_UART);
     }

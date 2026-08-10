@@ -107,8 +107,17 @@
  * uart_manager.c и продублированы в каждом профиле config_manager.c,
  * так что смена значения требовала правки в трёх местах — и любое
  * забытое расходилось с остальными. */
-#define BOARD_UART1_DEFAULT_RX_GPIO   33
+/* CRSF с пульта приходит по одному проводу (данные + земля), поэтому RX и
+ * TX сведены на один GPIO: приём кадров управления и обратная телеметрия
+ * идут по общей линии. Режим включается BOARD_UART1_DEFAULT_DUPLEX ниже —
+ * без него config_manager отвергнет совпадающие RX/TX как занятый дважды
+ * пин. Для обычной двухпроводной схемы вернуть RX на 33 и duplex в FULL. */
+#define BOARD_UART1_DEFAULT_RX_GPIO   32
 #define BOARD_UART1_DEFAULT_TX_GPIO   32
+/* Числом, а не UART_DUPLEX_HALF_SINGLE_WIRE: board_config.h подключается
+ * из network_manager.c и main.c, где uart_manager.h с этим enum'ом не
+ * виден. Значение сверяется со static_assert в uart_manager.c. */
+#define BOARD_UART1_DEFAULT_DUPLEX    1
 #define BOARD_UART1_DEFAULT_NAME      "UART1_CRSF"
 /* У TBS Crossfire штатная скорость CRSF — 420000. Здесь 400000: именно
  * её показывает EdgeTX в Model Setup -> External RF -> Baudrate на
