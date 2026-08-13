@@ -44,6 +44,12 @@ void      routing_manager_default_config(uint8_t channel_id, routing_cfg_t *out)
 /* Доступ к состоянию парсеров для web/diagnostics */
 const routing_parsers_t *routing_manager_get_parsers(uint8_t channel_id);
 
+/* Разбор встречного направления: то, что пришло из сети и уходит в UART.
+ * Отдельный набор состояний, а не общий с приёмом из провода: на канале
+ * с двусторонним обменом счётчики иначе смешались бы, и было бы не
+ * понять, чьи кадры бьются — те, что пришли по проводу, или по сети. */
+const routing_parsers_t *routing_manager_get_net_parsers(uint8_t channel_id);
+
 #ifdef __cplusplus
 }
 #endif

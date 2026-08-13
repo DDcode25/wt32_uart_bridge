@@ -278,6 +278,29 @@ char *diagnostics_status_json(void)
         cJSON_AddNumberToObject(c, "tcp_clients", tst.tcp_clients_connected);
         cJSON_AddNumberToObject(c, "last_net_rx_ms", tst.last_net_rx_ms);
 
+        /* Протокольная статистика встречного направления: то, что пришло
+         * из сети и ушло в UART. Отдельно от приёма из провода, иначе на
+         * канале с двусторонним обменом не разобрать, чьи кадры бьются. */
+        const routing_parsers_t *pn = routing_manager_get_net_parsers(i);
+        if (pn && ucfg.protocol == PROTO_MODE_CRSF) {
+            cJSON *nr = cJSON_CreateObject();
+            cJSON_AddNumberToObject(nr, "rx_frames_total", pn->crsf.state.rx_frames_total);
+            cJSON_AddNumberToObject(nr, "crc_errors", pn->crsf.state.crc_errors);
+            cJSON_AddNumberToObject(nr, "last_addr", pn->crsf.state.last_addr);
+            cJSON *nch = cJSON_CreateArray();
+            for (int k = 0; k < CRSF_NUM_CHANNELS; k++)
+                cJSON_AddItemToArray(nch, cJSON_CreateNumber(pn->crsf.state.channels[k]));
+            cJSON_AddItemToObject(nr, "channels", nch);
+            cJSON_AddItemToObject(c, "crsf_from_net", nr);
+        }
+        if (pn && ucfg.protocol == PROTO_MODE_MAVLINK) {
+            cJSON *nm = cJSON_CreateObject();
+            cJSON_AddNumberToObject(nm, "rx_frames_v1", pn->mavlink.state.rx_frames_v1);
+            cJSON_AddNumberToObject(nm, "rx_frames_v2", pn->mavlink.state.rx_frames_v2);
+            cJSON_AddNumberToObject(nm, "frame_errors", pn->mavlink.state.frame_errors);
+            cJSON_AddItemToObject(c, "mavlink_from_net", nm);
+        }
+
         /* Протокольная статистика */
         const routing_parsers_t *p = routing_manager_get_parsers(i);
         if (p) {

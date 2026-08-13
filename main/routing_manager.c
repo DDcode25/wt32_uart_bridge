@@ -8,7 +8,8 @@ static const char *TAG = "routing";
 
 typedef struct {
     routing_cfg_t     cfg;
-    routing_parsers_t parsers;
+    routing_parsers_t parsers;      /* поток из UART */
+    routing_parsers_t parsers_net;  /* поток из сети, см. заголовок */
 } routing_channel_t;
 
 static routing_channel_t s_rt[UART_MGR_NUM_CHANNELS];
@@ -62,11 +63,37 @@ static void on_uart_rx(uint8_t channel_id, const uint8_t *data, size_t len, void
 }
 
 /* сеть -> UART (прозрачно) */
+/* Приёмная сторона моста тоже должна видеть, что до неё дошло: сколько
+ * кадров, целы ли они, какие значения каналов. Байты при этом уходят в
+ * UART без изменений — разбор только наблюдает, как и на встречном пути. */
+static void observe_net(routing_channel_t *rt, uint8_t channel_id,
+                        const uint8_t *data, size_t len)
+{
+    uart_mgr_channel_cfg_t ucfg;
+    if (uart_manager_get_config(channel_id, &ucfg) != ESP_OK) return;
+
+    switch (ucfg.protocol) {
+        case PROTO_MODE_CRSF:
+            crsf_parser_feed(&rt->parsers_net.crsf, channel_id, data, len, NULL, NULL);
+            break;
+        case PROTO_MODE_SBUS:
+            sbus_parser_feed(&rt->parsers_net.sbus, channel_id, data, len, NULL, NULL);
+            break;
+        case PROTO_MODE_MAVLINK:
+            mavlink_parser_feed(&rt->parsers_net.mavlink, channel_id, data, len, NULL, NULL);
+            break;
+        default:
+            break;   /* RAW и прочие: разбирать нечего */
+    }
+}
+
 static void on_net_rx(uint8_t channel_id, const uint8_t *data, size_t len, void *ctx)
 {
     (void)ctx;
     if (channel_id >= UART_MGR_NUM_CHANNELS) return;
-    if (!s_rt[channel_id].cfg.net_to_uart) return;
+    routing_channel_t *rt = &s_rt[channel_id];
+    if (!rt->cfg.net_to_uart) return;
+    observe_net(rt, channel_id, data, len);
     uart_manager_write(channel_id, data, len);
 }
 
@@ -98,4 +125,10 @@ const routing_parsers_t *routing_manager_get_parsers(uint8_t channel_id)
 {
     if (channel_id >= UART_MGR_NUM_CHANNELS) return NULL;
     return &s_rt[channel_id].parsers;
+}
+
+const routing_parsers_t *routing_manager_get_net_parsers(uint8_t channel_id)
+{
+    if (channel_id >= UART_MGR_NUM_CHANNELS) return NULL;
+    return &s_rt[channel_id].parsers_net;
 }

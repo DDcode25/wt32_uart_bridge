@@ -615,6 +615,15 @@ async function poll(){
         row('TCP клієнтів',c.tcp_clients)+
         row('Останнє приймання UART',c.last_rx_time_ms?c.last_rx_time_ms+' мс':'—')+
         row('Watchdog',c.alive?'<span class="ok">OK</span>':'<span class="err">таймаут</span>');
+      if(c.crsf_from_net){
+        t+=row('<b>З мережі:</b> кадрів CRSF',c.crsf_from_net.rx_frames_total)+
+           row('З мережі: помилок CRC',c.crsf_from_net.crc_errors>0?`<span class="err">${c.crsf_from_net.crc_errors}</span>`:'0')+
+           row('З мережі: канали 1-4',c.crsf_from_net.channels.slice(0,4).join(' · '));
+      }
+      if(c.mavlink_from_net){
+        t+=row('<b>З мережі:</b> MAVLink v1/v2',c.mavlink_from_net.rx_frames_v1+' / '+c.mavlink_from_net.rx_frames_v2)+
+           row('З мережі: помилок кадрування',c.mavlink_from_net.frame_errors>0?`<span class="err">${c.mavlink_from_net.frame_errors}</span>`:'0');
+      }
       if(c.crsf){t+=row('CRSF кадрів',c.crsf.rx_frames_total)+row('CRSF кадрів каналів',c.crsf.rx_frames_channels)+
         row('Помилок CRC',c.crsf.crc_errors>0?`<span class="err">${c.crsf.crc_errors}</span>`:'0')+
         row('Помилок синхронізації',c.crsf.sync_errors)+row('Некоректна довжина',c.crsf.bad_length_frames)+
