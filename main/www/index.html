@@ -644,7 +644,7 @@ async function poll(){
               (n.battery.current_da/10).toFixed(1)+' А · '+n.battery.used_mah+' мА·год · '+
               n.battery.remaining_pct+'%');
         if(n.gps.ms)r+=row('GPS',(n.gps.lat_1e7/1e7).toFixed(6)+', '+(n.gps.lon_1e7/1e7).toFixed(6))+
-          row('GPS швидк. / курс / висота',(n.gps.speed_kmh_d/10).toFixed(1)+' км/год · '+
+          row('GPS швидк. / курс / висота',(n.gps.speed_ckmh/100).toFixed(2)+' км/год · '+
               (n.gps.heading_cdeg/100).toFixed(1)+'° · '+n.gps.alt_m+' м')+
           row('Супутників',n.gps.satellites);
         if(n.attitude.ms){const deg=v=>(v/10000*180/Math.PI).toFixed(1);

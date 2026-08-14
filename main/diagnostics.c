@@ -247,7 +247,7 @@ static cJSON *crsf_state_to_json(const crsf_state_t *st)
     cJSON *gps = cJSON_CreateObject();
     cJSON_AddNumberToObject(gps, "lat_1e7", st->gps_lat_1e7);
     cJSON_AddNumberToObject(gps, "lon_1e7", st->gps_lon_1e7);
-    cJSON_AddNumberToObject(gps, "speed_kmh_d", st->gps_speed_kmh_d);
+    cJSON_AddNumberToObject(gps, "speed_ckmh", st->gps_speed_ckmh);
     cJSON_AddNumberToObject(gps, "heading_cdeg", st->gps_heading_cdeg);
     cJSON_AddNumberToObject(gps, "alt_m", st->gps_alt_m);
     cJSON_AddNumberToObject(gps, "satellites", st->gps_satellites);

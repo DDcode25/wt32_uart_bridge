@@ -6,13 +6,44 @@
  * несколько адресов безопасно — проверка целостности не меняется. */
 static bool crsf_addr_known(uint8_t b)
 {
-    /* CRSF_ADDR_BROADCAST (0x00) намеренно НЕ принимается: нулевые байты
-     * в потоке встречаются постоянно, и парсер цеплялся бы за каждый,
-     * читал мусорную длину и терял настоящее начало кадра. */
-    return b == CRSF_ADDR_FLIGHT_CONTROLLER ||
-           b == CRSF_ADDR_CRSF_TRANSMITTER  ||
-           b == CRSF_ADDR_RADIO_TRANSMITTER ||
-           b == CRSF_ADDR_RECEIVER;
+    /* Список адресов по официальной спецификации TBS. Раньше их было
+     * четыре, и кадры от датчиков, VTX, OSD или репитеров парсер терял,
+     * засчитывая каждый их байт в sync_errors.
+     *
+     * Два исключения сделаны намеренно:
+     *   - broadcast 0x00: нулевые байты в потоке встречаются постоянно, и
+     *     парсер цеплялся бы за каждый, читая мусорную длину;
+     *   - динамический диапазон NAT 0x20..0x7F: он покрывает треть всех
+     *     значений байта, включая печатаемый ASCII, и ложные старты кадра
+     *     на нём стоили бы дороже, чем изредка потерянный кадр.
+     * И то и другое ухудшило бы синхронизацию, а не улучшило. */
+    switch (b) {
+        case 0x0E:                          /* Cloud */
+        case 0x10:                          /* USB Device */
+        case 0x12:                          /* Bluetooth / WiFi */
+        case 0x13:                          /* WiFi receiver */
+        case 0x14:                          /* Video Receiver */
+        case 0x80:                          /* OSD / TBS CORE PNP PRO */
+        case 0x8A:                          /* Reserved */
+        case 0xB0: case 0xB2:               /* Crossfire reserved */
+        case 0xC0:                          /* датчик тока/напряжения */
+        case 0xC2:                          /* GPS */
+        case 0xC4:                          /* TBS Blackbox */
+        case CRSF_ADDR_FLIGHT_CONTROLLER:   /* 0xC8 */
+        case 0xCA:                          /* Reserved */
+        case 0xCC:                          /* Race tag */
+        case 0xCE:                          /* VTX */
+        case CRSF_ADDR_RADIO_TRANSMITTER:   /* 0xEA пульт */
+        case 0xEB:                          /* Repeater Receiver */
+        case CRSF_ADDR_RECEIVER:            /* 0xEC */
+        case 0xED:                          /* Repeater Transmitter Module */
+        case CRSF_ADDR_CRSF_TRANSMITTER:    /* 0xEE ВЧ-модуль */
+        case 0xF0: case 0xF2:               /* Reserved */
+            return true;
+        default:
+            /* ESC 1..8 идут подряд, отдельными метками их перечислять незачем */
+            return b >= 0x90 && b <= 0x97;
+    }
 }
 
 uint8_t crsf_crc8_dvb_s2(const uint8_t *data, size_t len)
@@ -81,8 +112,8 @@ static uint32_t now_ms(void) { return (uint32_t)(esp_timer_get_time() / 1000); }
 static void decode_battery(crsf_parser_t *p, const uint8_t *pl, size_t len)
 {
     if (len < 8) return;
-    p->state.batt_voltage_dv     = be16(&pl[0]);
-    p->state.batt_current_da     = be16(&pl[2]);
+    p->state.batt_voltage_dv     = (int16_t)be16(&pl[0]);
+    p->state.batt_current_da     = (int16_t)be16(&pl[2]);
     p->state.batt_used_mah       = be24(&pl[4]);
     p->state.batt_remaining_pct  = pl[7];
     p->state.batt_frame_ms       = now_ms();
@@ -93,7 +124,7 @@ static void decode_gps(crsf_parser_t *p, const uint8_t *pl, size_t len)
     if (len < 15) return;
     p->state.gps_lat_1e7      = be32(&pl[0]);
     p->state.gps_lon_1e7      = be32(&pl[4]);
-    p->state.gps_speed_kmh_d  = be16(&pl[8]);
+    p->state.gps_speed_ckmh   = be16(&pl[8]);
     p->state.gps_heading_cdeg = be16(&pl[10]);
     /* Высота передаётся со смещением +1000 м, чтобы влезть в unsigned */
     p->state.gps_alt_m        = (int32_t)be16(&pl[12]) - 1000;
@@ -286,7 +317,7 @@ size_t crsf_build_link_stats_frame(const crsf_link_stats_t *ls, uint8_t *out_buf
     return 14;
 }
 
-size_t crsf_build_battery_frame(uint16_t voltage_dv, uint16_t current_da,
+size_t crsf_build_battery_frame(int16_t voltage_dv, int16_t current_da,
                                 uint32_t used_mah, uint8_t remaining_pct,
                                 uint8_t *out_buf, size_t out_buf_size)
 {
@@ -296,10 +327,10 @@ size_t crsf_build_battery_frame(uint16_t voltage_dv, uint16_t current_da,
     out_buf[0] = CRSF_SYNC_BYTE;
     out_buf[1] = 10;                  /* TYPE(1) + payload(8) + CRC(1) */
     out_buf[2] = CRSF_FRAMETYPE_BATTERY_SENSOR;
-    out_buf[3] = (uint8_t)(voltage_dv >> 8);
-    out_buf[4] = (uint8_t)(voltage_dv & 0xFF);
-    out_buf[5] = (uint8_t)(current_da >> 8);
-    out_buf[6] = (uint8_t)(current_da & 0xFF);
+    out_buf[3] = (uint8_t)(((uint16_t)voltage_dv) >> 8);
+    out_buf[4] = (uint8_t)(((uint16_t)voltage_dv) & 0xFF);
+    out_buf[5] = (uint8_t)(((uint16_t)current_da) >> 8);
+    out_buf[6] = (uint8_t)(((uint16_t)current_da) & 0xFF);
     out_buf[7] = (uint8_t)((used_mah >> 16) & 0xFF);
     out_buf[8] = (uint8_t)((used_mah >> 8) & 0xFF);
     out_buf[9] = (uint8_t)(used_mah & 0xFF);

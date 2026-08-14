@@ -80,8 +80,11 @@ typedef struct {
      * многобайтовые поля в CRSF идут big-endian. --- */
 
     /* Battery sensor (0x08) */
-    uint16_t batt_voltage_dv;      /* 0.1 В */
-    uint16_t batt_current_da;      /* 0.1 А */
+    /* Спецификация объявляет напряжение и ток ЗНАКОВЫМИ (int16_t): ток
+     * бывает отрицательным при рекуперации, и беззнаковый разбор
+     * показывал бы вместо этого около 6.5 кА. */
+    int16_t  batt_voltage_dv;      /* 0.1 В */
+    int16_t  batt_current_da;      /* 0.1 А */
     uint32_t batt_used_mah;        /* 24 бита в кадре */
     uint8_t  batt_remaining_pct;
     uint32_t batt_frame_ms;        /* 0 = кадр ни разу не приходил */
@@ -89,7 +92,10 @@ typedef struct {
     /* GPS (0x02) */
     int32_t  gps_lat_1e7;
     int32_t  gps_lon_1e7;
-    uint16_t gps_speed_kmh_d;      /* 0.1 км/ч */
+    /* Спецификация TBS задаёт «km/h / 100», то есть младший разряд —
+     * 0.01 км/ч, как и у курса. Раньше делили на 10 и завышали скорость
+     * ровно в десять раз. */
+    uint16_t gps_speed_ckmh;       /* 0.01 км/ч */
     uint16_t gps_heading_cdeg;     /* 0.01 градуса */
     int32_t  gps_alt_m;            /* метры, смещение 1000 уже снято */
     uint8_t  gps_satellites;
@@ -170,7 +176,7 @@ typedef struct {
 /* Сборка телеметрийных кадров для тестового генератора. Возвращают длину
  * кадра целиком (адрес..CRC) либо 0, если буфер мал. */
 size_t crsf_build_link_stats_frame(const crsf_link_stats_t *ls, uint8_t *out_buf, size_t out_buf_size);
-size_t crsf_build_battery_frame(uint16_t voltage_dv, uint16_t current_da,
+size_t crsf_build_battery_frame(int16_t voltage_dv, int16_t current_da,
                                 uint32_t used_mah, uint8_t remaining_pct,
                                 uint8_t *out_buf, size_t out_buf_size);
 

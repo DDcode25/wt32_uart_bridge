@@ -167,7 +167,7 @@ static void generate_to_uart(routing_channel_t *rt, uint8_t channel_id)
      * разбирается ли вообще что-то кроме них. */
     if (rt->gen_uart_frames & 1) {
         /* Напряжение плавно падает и начинает круг заново */
-        uint16_t volt = (uint16_t)(150 + (rt->gen_phase % 100));   /* 15.0..25.0 В */
+        int16_t volt = (int16_t)(150 + (rt->gen_phase % 100));   /* 15.0..25.0 В */
         n = crsf_build_battery_frame(volt, 25, rt->gen_uart_frames,
                                      (uint8_t)(100 - (rt->gen_phase % 100)),
                                      frame, sizeof(frame));
