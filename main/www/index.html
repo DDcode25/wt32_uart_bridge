@@ -644,6 +644,10 @@ async function poll(){
           r+=row('Attitude pitch/roll/yaw',deg(n.attitude.pitch_1e4)+'° / '+
               deg(n.attitude.roll_1e4)+'° / '+deg(n.attitude.yaw_1e4)+'°');}
         if(n.flight_mode_ms)r+=row('Режим польоту',n.flight_mode||'—');
+        // Повтори не помилка: джерело віддає кадри нерівно. Але якщо їх
+        // більше, ніж власне кадрів, потік тримається майже самим мостом.
+        if(n.hold_repeats!==undefined)r+=row('Утримання (повторів)',
+            n.hold_repeats>n.rx_frames_total?`<span class="warn">${n.hold_repeats}</span>`:n.hold_repeats);
         if(!n.rx_frames_total)r+=row('','<span class="mut">кадрів із мережі ще не було</span>');
         return r;
       }

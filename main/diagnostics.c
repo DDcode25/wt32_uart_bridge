@@ -369,8 +369,12 @@ char *diagnostics_status_json(void)
                 /* Встречный поток разбирается отдельным набором парсеров:
                  * с UART идут команды, из сети возвращается телеметрия. */
                 const routing_parsers_t *np = routing_manager_get_net_parsers(i);
-                if (np) cJSON_AddItemToObject(c, "crsf_from_net",
-                                              crsf_state_to_json(&np->crsf.state));
+                if (np) {
+                    cJSON *nj = crsf_state_to_json(&np->crsf.state);
+                    cJSON_AddNumberToObject(nj, "hold_repeats",
+                                            routing_manager_get_telem_repeats(i));
+                    cJSON_AddItemToObject(c, "crsf_from_net", nj);
+                }
             } else if (ucfg.protocol == PROTO_MODE_SBUS) {
                 cJSON *sb = cJSON_CreateObject();
                 cJSON_AddNumberToObject(sb, "rx_frames_total", p->sbus.state.rx_frames_total);

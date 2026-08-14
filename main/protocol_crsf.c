@@ -168,6 +168,14 @@ static void process_frame(crsf_parser_t *p, const uint8_t *frame, size_t frame_l
         case CRSF_FRAMETYPE_LINK_STATISTICS:
             decode_link_stats(p, payload, payload_len);
             p->state.link_stats_frame_ms = now_ms();
+            /* Сохраняем кадр целиком для последующего повтора. В frame
+             * адреса нет, он снят разбором, поэтому возвращаем его на
+             * место — иначе получится не кадр, а его хвост. */
+            if ((size_t)len + 2 <= CRSF_MAX_FRAME_LEN) {
+                p->state.last_link_stats_frame[0] = p->state.last_addr;
+                memcpy(&p->state.last_link_stats_frame[1], frame, (size_t)len + 1);
+                p->state.last_link_stats_len = (uint8_t)(len + 2);
+            }
             break;
         case CRSF_FRAMETYPE_BATTERY_SENSOR:
             decode_battery(p, payload, payload_len);

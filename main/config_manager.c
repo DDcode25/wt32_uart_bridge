@@ -412,6 +412,7 @@ char *config_manager_to_json(const app_config_t *cfg)
 
         cJSON_AddBoolToObject(c, "uart_to_net", cfg->routing[i].uart_to_net);
         cJSON_AddBoolToObject(c, "net_to_uart", cfg->routing[i].net_to_uart);
+        cJSON_AddNumberToObject(c, "telemetry_hold_ms", cfg->routing[i].telemetry_hold_ms);
 
         cJSON_AddItemToArray(chans, c);
     }
@@ -539,6 +540,8 @@ esp_err_t config_manager_from_json(const char *json, app_config_t *out)
 
             out->routing[id].uart_to_net = json_bool(c, "uart_to_net", out->routing[id].uart_to_net);
             out->routing[id].net_to_uart = json_bool(c, "net_to_uart", out->routing[id].net_to_uart);
+            int hold = json_int(c, "telemetry_hold_ms", (int)out->routing[id].telemetry_hold_ms);
+            if (hold >= 0 && hold <= 10000) out->routing[id].telemetry_hold_ms = (uint16_t)hold;
         }
     }
 
