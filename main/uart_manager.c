@@ -179,10 +179,10 @@ static void rx_task(void *arg)
 {
     uart_channel_t *ch = (uart_channel_t *)arg;
     uart_port_t port = channel_to_port(ch->cfg.channel_id);
-    uint8_t buf[512];
+    uint8_t buf[UART_MGR_RX_CHUNK_BYTES];
 
     while (1) {
-        int len = uart_read_bytes(port, buf, sizeof(buf), pdMS_TO_TICKS(20));
+        int len = uart_read_bytes(port, buf, sizeof(buf), pdMS_TO_TICKS(UART_MGR_RX_WAIT_MS));
         if (len > 0) {
             xSemaphoreTake(ch->lock, portMAX_DELAY);
             ch->stats.rx_bytes += len;
