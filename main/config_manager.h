@@ -19,7 +19,8 @@
 extern "C" {
 #endif
 
-/* Версия 2: в routing_cfg_t добавлено telemetry_hold_ms.
+/* Версия 3: в routing_cfg_t добавлены флаги тестового генератора CRSF.
+ * Версия 2: в routing_cfg_t добавлено telemetry_hold_ms.
  *
  * Поднимать эту версию ОБЯЗАТЕЛЬНО при любом изменении раскладки структур,
  * попадающих в NVS. Конфигурация хранится одним блобом, и загрузка
@@ -27,7 +28,7 @@ extern "C" {
  * сохранённые настройки молча заменяются заводскими. Один раз это уже
  * стоило потерянных настроек канала на живой плате — новое поле поехало
  * в прошивку без бампа, и после OTA пины вернулись к заводским. */
-#define CONFIG_SCHEMA_VERSION   2
+#define CONFIG_SCHEMA_VERSION   3
 #define CONFIG_WEB_USER_LEN     24
 #define CONFIG_PWHASH_LEN       32   /* SHA-256 */
 #define CONFIG_SALT_LEN         16

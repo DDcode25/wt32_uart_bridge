@@ -434,7 +434,13 @@ function render(){
   document.getElementById('routeforms').innerHTML=cfg.channels.map(c=>
     `<div class="row"><label>${c.name}</label>
      <label style="flex:0 0 auto"><input type="checkbox" id="c${c.channel_id}_u2n" ${c.uart_to_net?'checked':''}> UART→мережа</label>
-     <label style="flex:0 0 auto"><input type="checkbox" id="c${c.channel_id}_n2u" ${c.net_to_uart?'checked':''}> мережа→UART</label></div>`).join('');
+     <label style="flex:0 0 auto"><input type="checkbox" id="c${c.channel_id}_n2u" ${c.net_to_uart?'checked':''}> мережа→UART</label>`+
+     (c.protocol===1?`
+     <label style="flex:0 0 auto" title="Генератор додає власний потік поряд зі справжнім — на бойовому лінку не вмикати">
+       <input type="checkbox" id="c${c.channel_id}_tnet" ${c.crsf_test_to_net?'checked':''}> тест CRSF→мережа</label>
+     <label style="flex:0 0 auto" title="Синтетична телеметрія в пульт: link stats + батарея">
+       <input type="checkbox" id="c${c.channel_id}_tuart" ${c.crsf_test_to_uart?'checked':''}> тест CRSF→UART</label>`:'')+
+     `</div>`).join('');
 }
 
 function collect(){
@@ -465,6 +471,7 @@ function collect(){
     c.udp_destinations.forEach((d,k)=>{d.ip=g('c'+i+'_d'+k+'_ip').value;d.port=+g('c'+i+'_d'+k+'_p').value;d.enabled=g('c'+i+'_d'+k+'_e').checked;});
     if(g('c'+i+'_proto'))c.protocol=+g('c'+i+'_proto').value;
     if(g('c'+i+'_u2n')){c.uart_to_net=g('c'+i+'_u2n').checked;c.net_to_uart=g('c'+i+'_n2u').checked;}
+    if(g('c'+i+'_tnet')){c.crsf_test_to_net=g('c'+i+'_tnet').checked;c.crsf_test_to_uart=g('c'+i+'_tuart').checked;}
   });
 }
 

@@ -264,3 +264,46 @@ size_t crsf_build_channels_frame(const uint16_t channels[CRSF_NUM_CHANNELS], uin
     out_buf[25] = crsf_crc8_dvb_s2(&out_buf[2], 23); /* TYPE+payload */
     return 26;
 }
+
+size_t crsf_build_link_stats_frame(const crsf_link_stats_t *ls, uint8_t *out_buf, size_t out_buf_size)
+{
+    /* ADDR LEN TYPE [10 байт] CRC = 14 байт */
+    if (out_buf_size < 14 || !ls) return 0;
+    out_buf[0] = CRSF_SYNC_BYTE;
+    out_buf[1] = 12;                  /* TYPE(1) + payload(10) + CRC(1) */
+    out_buf[2] = CRSF_FRAMETYPE_LINK_STATISTICS;
+    out_buf[3]  = ls->uplink_rssi_1;
+    out_buf[4]  = ls->uplink_rssi_2;
+    out_buf[5]  = ls->uplink_lq;
+    out_buf[6]  = (uint8_t)ls->uplink_snr;
+    out_buf[7]  = ls->active_antenna;
+    out_buf[8]  = ls->rf_mode;
+    out_buf[9]  = ls->uplink_tx_power;
+    out_buf[10] = ls->downlink_rssi;
+    out_buf[11] = ls->downlink_lq;
+    out_buf[12] = (uint8_t)ls->downlink_snr;
+    out_buf[13] = crsf_crc8_dvb_s2(&out_buf[2], 11);   /* TYPE+payload */
+    return 14;
+}
+
+size_t crsf_build_battery_frame(uint16_t voltage_dv, uint16_t current_da,
+                                uint32_t used_mah, uint8_t remaining_pct,
+                                uint8_t *out_buf, size_t out_buf_size)
+{
+    /* ADDR LEN TYPE [8 байт] CRC = 12 байт. Телеметрия big-endian, а
+     * израсходованная ёмкость занимает три байта, а не четыре. */
+    if (out_buf_size < 12) return 0;
+    out_buf[0] = CRSF_SYNC_BYTE;
+    out_buf[1] = 10;                  /* TYPE(1) + payload(8) + CRC(1) */
+    out_buf[2] = CRSF_FRAMETYPE_BATTERY_SENSOR;
+    out_buf[3] = (uint8_t)(voltage_dv >> 8);
+    out_buf[4] = (uint8_t)(voltage_dv & 0xFF);
+    out_buf[5] = (uint8_t)(current_da >> 8);
+    out_buf[6] = (uint8_t)(current_da & 0xFF);
+    out_buf[7] = (uint8_t)((used_mah >> 16) & 0xFF);
+    out_buf[8] = (uint8_t)((used_mah >> 8) & 0xFF);
+    out_buf[9] = (uint8_t)(used_mah & 0xFF);
+    out_buf[10] = remaining_pct;
+    out_buf[11] = crsf_crc8_dvb_s2(&out_buf[2], 9);    /* TYPE+payload */
+    return 12;
+}

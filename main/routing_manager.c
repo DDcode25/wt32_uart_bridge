@@ -18,6 +18,13 @@ typedef struct {
     uint32_t last_fresh_telem_ms;   /* приход настоящего кадра из сети */
     uint32_t last_telem_out_ms;     /* последняя запись в UART, своя или повтор */
     uint32_t telem_repeats;         /* сколько раз закрывали провал */
+
+    /* Тестовый генератор */
+    uint32_t gen_net_ms;
+    uint32_t gen_uart_ms;
+    uint16_t gen_phase;             /* бегает по кругу, чтобы каналы шевелились */
+    uint32_t gen_net_frames;
+    uint32_t gen_uart_frames;
 } routing_channel_t;
 
 static routing_channel_t s_rt[UART_MGR_NUM_CHANNELS];
@@ -127,25 +134,98 @@ static void on_net_rx(uint8_t channel_id, const uint8_t *data, size_t len, void 
     }
 }
 
+/* Тестовый генератор: кадры каналов в сеть и телеметрия в UART.
+ *
+ * Значения намеренно шевелятся — на неподвижной картинке невозможно
+ * отличить работающий тракт от замершего на первом же кадре. Фаза гоняет
+ * пилу по диапазону CRSF, остальные каналы разложены по характерным
+ * точкам, чтобы их было видно в интерфейсе. */
+static void generate_to_net(routing_channel_t *rt, uint8_t channel_id)
+{
+    uint16_t ch[CRSF_NUM_CHANNELS];
+    /* 172..1811 — штатный диапазон CRSF, 992 — центр */
+    uint16_t sweep = (uint16_t)(172 + (rt->gen_phase % 1640));
+    ch[0] = sweep;
+    ch[1] = (uint16_t)(1811 - (rt->gen_phase % 1640));   /* встречная пила */
+    ch[2] = 172;                                          /* газ в минимуме */
+    ch[3] = 992;
+    for (int i = 4; i < CRSF_NUM_CHANNELS; i++) ch[i] = 992;
+    ch[14] = 172;
+    ch[15] = 1811;
+
+    uint8_t frame[32];
+    size_t n = crsf_build_channels_frame(ch, frame, sizeof(frame));
+    if (n && transport_send(channel_id, frame, n) == ESP_OK) rt->gen_net_frames++;
+}
+
+static void generate_to_uart(routing_channel_t *rt, uint8_t channel_id)
+{
+    uint8_t frame[32];
+    size_t n;
+
+    /* Чередуем два типа: по одному только link statistics не отличить,
+     * разбирается ли вообще что-то кроме них. */
+    if (rt->gen_uart_frames & 1) {
+        /* Напряжение плавно падает и начинает круг заново */
+        uint16_t volt = (uint16_t)(150 + (rt->gen_phase % 100));   /* 15.0..25.0 В */
+        n = crsf_build_battery_frame(volt, 25, rt->gen_uart_frames,
+                                     (uint8_t)(100 - (rt->gen_phase % 100)),
+                                     frame, sizeof(frame));
+    } else {
+        crsf_link_stats_t ls = {
+            .uplink_rssi_1 = 45, .uplink_rssi_2 = 50,
+            .uplink_lq = (uint8_t)(70 + (rt->gen_phase % 30)),
+            .uplink_snr = 10, .active_antenna = 0, .rf_mode = 2,
+            .uplink_tx_power = 3, .downlink_rssi = 55,
+            .downlink_lq = (uint8_t)(80 + (rt->gen_phase % 20)),
+            .downlink_snr = 8,
+        };
+        n = crsf_build_link_stats_frame(&ls, frame, sizeof(frame));
+    }
+    if (n && uart_manager_write(channel_id, frame, n) == ESP_OK) rt->gen_uart_frames++;
+}
+
 /* Закрывает паузы в телеметрии повтором последнего кадра link statistics.
  *
  * Отдельная задача, а не таймер: запись в UART блокирующая, а в
  * однопроводном режиме ещё и ждёт ухода последнего байта, чего в
  * контексте таймера делать нельзя. */
-static void telemetry_hold_task(void *arg)
+static void routing_service_task(void *arg)
 {
     (void)arg;
+    /* Тик задаётся самым частым потребителем — генератором RC на 50 Гц.
+     * Удержание работает по отметкам времени, поэтому частый тик ему не
+     * мешает, а сотня пробуждений в секунду ничего не стоит. */
+    const uint32_t rc_interval    = 1000 / ROUTING_TEST_RC_HZ;
+    const uint32_t telem_interval = 1000 / ROUTING_TEST_TELEM_HZ;
+
     while (1) {
-        vTaskDelay(pdMS_TO_TICKS(ROUTING_TELEM_GAP_MS / 2));
+        vTaskDelay(pdMS_TO_TICKS(10));
         uint32_t now = (uint32_t)(esp_timer_get_time() / 1000);
 
         for (uint8_t i = 0; i < UART_MGR_NUM_CHANNELS; i++) {
             routing_channel_t *rt = &s_rt[i];
-            if (rt->cfg.telemetry_hold_ms == 0 || !rt->cfg.net_to_uart) continue;
 
             uart_mgr_channel_cfg_t ucfg;
             if (uart_manager_get_config(i, &ucfg) != ESP_OK) continue;
             if (ucfg.protocol != PROTO_MODE_CRSF || !ucfg.enabled) continue;
+
+            /* --- тестовый генератор --- */
+            if (rt->cfg.crsf_test_to_net && now - rt->gen_net_ms >= rc_interval) {
+                rt->gen_net_ms = now;
+                rt->gen_phase++;
+                generate_to_net(rt, i);
+            }
+            if (rt->cfg.crsf_test_to_uart && now - rt->gen_uart_ms >= telem_interval) {
+                rt->gen_uart_ms = now;
+                generate_to_uart(rt, i);
+                /* Своя посылка тоже считается за поток в пульт, иначе
+                 * удержание примется дублировать генератор. */
+                rt->last_telem_out_ms = now;
+            }
+
+            /* --- удержание телеметрии --- */
+            if (rt->cfg.telemetry_hold_ms == 0 || !rt->cfg.net_to_uart) continue;
 
             const crsf_state_t *st = &rt->net_parsers.crsf.state;
             if (st->last_link_stats_len == 0) continue;   /* повторять пока нечего */
@@ -179,8 +259,8 @@ esp_err_t routing_manager_init(void)
     }
     /* Приоритет ниже задач приёма: удержание — дело фоновое, задерживать
      * ради него разбор входящего потока незачем. */
-    if (xTaskCreate(telemetry_hold_task, "telem_hold", 3072, NULL, 5, NULL) != pdPASS) {
-        ESP_LOGE(TAG, "failed to create telemetry hold task");
+    if (xTaskCreate(routing_service_task, "routing_svc", 3072, NULL, 5, NULL) != pdPASS) {
+        ESP_LOGE(TAG, "failed to create routing service task");
         return ESP_FAIL;
     }
 

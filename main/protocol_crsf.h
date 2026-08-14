@@ -153,6 +153,27 @@ uint8_t crsf_crc8_dvb_s2(const uint8_t *data, size_t len);
 /* Собрать RC_CHANNELS_PACKED кадр (для генерации/тестового режима) */
 size_t crsf_build_channels_frame(const uint16_t channels[CRSF_NUM_CHANNELS], uint8_t *out_buf, size_t out_buf_size);
 
+/* Поля link statistics в том же порядке, в каком они лежат в кадре 0x14 */
+typedef struct {
+    uint8_t uplink_rssi_1;
+    uint8_t uplink_rssi_2;
+    uint8_t uplink_lq;
+    int8_t  uplink_snr;
+    uint8_t active_antenna;
+    uint8_t rf_mode;
+    uint8_t uplink_tx_power;
+    uint8_t downlink_rssi;
+    uint8_t downlink_lq;
+    int8_t  downlink_snr;
+} crsf_link_stats_t;
+
+/* Сборка телеметрийных кадров для тестового генератора. Возвращают длину
+ * кадра целиком (адрес..CRC) либо 0, если буфер мал. */
+size_t crsf_build_link_stats_frame(const crsf_link_stats_t *ls, uint8_t *out_buf, size_t out_buf_size);
+size_t crsf_build_battery_frame(uint16_t voltage_dv, uint16_t current_da,
+                                uint32_t used_mah, uint8_t remaining_pct,
+                                uint8_t *out_buf, size_t out_buf_size);
+
 #ifdef __cplusplus
 }
 #endif
