@@ -8,6 +8,9 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "driver/gpio.h"
+#include "esp_rom_gpio.h"
+#include "soc/uart_periph.h"
+#include "soc/gpio_sig_map.h"
 
 static const char *TAG = "uart_mgr";
 
@@ -42,6 +45,35 @@ static uart_port_t channel_to_port(uint8_t channel_id)
         case 2: return UART_NUM_2;
         default: return UART_NUM_MAX;
     }
+}
+
+/* Однопроводный half-duplex: вывод отдаётся передатчику только на время
+ * посылки, в покое TX физически отвязан от вывода.
+ *
+ * Раньше вывод постоянно висел в GPIO_MODE_INPUT_OUTPUT_OD с подключённым
+ * сигналом TX. Для неинвертированной линии это сходило с рук: уровень покоя
+ * UART — единица, а единица в открытом стоке означает «отпустить». Но при
+ * invert_tx уровень покоя становится нулём, то есть вывод постоянно
+ * притянут к земле, и приём умирает вместе с чужой передачей — линию
+ * держит сама плата. Отвязывая TX между посылками, снимаем и это, и
+ * необходимость держать invert_tx и invert_rx разными.
+ *
+ * На время самой посылки остаётся открытый сток: если оба конца заговорят
+ * одновременно, они лишь совместно тянут линию вниз, а не коротят выходы
+ * друг друга. Единицу при этом формирует подтяжка — внутренней (~45 кОм)
+ * на 400000 бод хватает впритык, внешняя на 1–4.7 кОм заметно надёжнее. */
+static void single_wire_tx_attach(int pin, uart_port_t port)
+{
+    gpio_set_direction((gpio_num_t)pin, GPIO_MODE_INPUT_OUTPUT_OD);
+    esp_rom_gpio_connect_out_signal(pin, UART_PERIPH_SIGNAL(port, SOC_UART_TX_PIN_IDX),
+                                    false, false);
+}
+
+static void single_wire_tx_release(int pin)
+{
+    /* SIG_GPIO_OUT_IDX отвязывает вывод от периферии, дальше он просто вход */
+    esp_rom_gpio_connect_out_signal(pin, SIG_GPIO_OUT_IDX, false, false);
+    gpio_set_direction((gpio_num_t)pin, GPIO_MODE_INPUT);
 }
 
 void uart_manager_default_config(uint8_t channel_id, uart_mgr_channel_cfg_t *out_cfg)
@@ -284,10 +316,12 @@ esp_err_t uart_manager_apply_config(const uart_mgr_channel_cfg_t *cfg)
         }
         uart_set_mode(port, UART_MODE_RS485_HALF_DUPLEX);
     } else if (cfg->duplex == UART_DUPLEX_HALF_SINGLE_WIRE) {
-        /* Single-wire: TX и RX на одном GPIO (S.Port и подобные) */
+        /* Single-wire: TX и RX на одном GPIO (S.Port и подобные).
+         * uart_set_pin ставит на вывод подтяжку — она и держит единицу,
+         * пока передатчик отвязан. */
         uart_set_pin(port, cfg->tx_gpio, cfg->tx_gpio, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
         uart_set_mode(port, UART_MODE_UART);
-        gpio_set_direction((gpio_num_t)cfg->tx_gpio, GPIO_MODE_INPUT_OUTPUT_OD);
+        single_wire_tx_release(cfg->tx_gpio);
     } else {
         uart_set_mode(port, UART_MODE_UART);
     }
@@ -332,7 +366,28 @@ esp_err_t uart_manager_write(uint8_t channel_id, const uint8_t *data, size_t len
     uart_channel_t *ch = &s_channels[channel_id];
     if (!ch->driver_installed) return ESP_ERR_INVALID_STATE;
     uart_port_t port = channel_to_port(channel_id);
+    bool single_wire = (ch->cfg.duplex == UART_DUPLEX_HALF_SINGLE_WIRE);
+
+    if (single_wire) single_wire_tx_attach(ch->cfg.tx_gpio, port);
+
     int written = uart_write_bytes(port, (const char *)data, len);
+
+    if (single_wire) {
+        /* Отпустить линию можно только после того, как последний байт
+         * реально ушёл: uart_write_bytes лишь кладёт данные в кольцевой
+         * буфер драйвера. */
+        uart_wait_tx_done(port, pdMS_TO_TICKS(UART_MGR_SINGLE_WIRE_TX_TIMEOUT_MS));
+        single_wire_tx_release(ch->cfg.tx_gpio);
+
+        /* На одном проводе приёмник слышит собственную посылку. Выкидываем
+         * её, иначе своё же эхо разбирается как входящий кадр и уходит
+         * обратно в сеть. Гонку с задачей приёма это не закрывает
+         * полностью — часть эха она может успеть забрать раньше, — но
+         * парсер такой мусор отбрасывает и ресинхронизируется. Заодно
+         * теряется то немногое, что пришло с линии за время посылки. */
+        uart_flush_input(port);
+    }
+
     if (written > 0) {
         xSemaphoreTake(ch->lock, portMAX_DELAY);
         ch->stats.tx_bytes += written;
