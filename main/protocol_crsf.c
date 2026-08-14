@@ -67,6 +67,82 @@ static void decode_link_stats(crsf_parser_t *p, const uint8_t *payload, size_t l
     p->state.downlink_snr         = (int8_t)payload[9];
 }
 
+/* Телеметрия CRSF передаётся big-endian, в отличие от упакованных каналов. */
+static uint16_t be16(const uint8_t *b) { return (uint16_t)((b[0] << 8) | b[1]); }
+static uint32_t be24(const uint8_t *b) { return ((uint32_t)b[0] << 16) | ((uint32_t)b[1] << 8) | b[2]; }
+static int32_t  be32(const uint8_t *b)
+{
+    return (int32_t)(((uint32_t)b[0] << 24) | ((uint32_t)b[1] << 16) |
+                     ((uint32_t)b[2] << 8)  |  (uint32_t)b[3]);
+}
+
+static uint32_t now_ms(void) { return (uint32_t)(esp_timer_get_time() / 1000); }
+
+static void decode_battery(crsf_parser_t *p, const uint8_t *pl, size_t len)
+{
+    if (len < 8) return;
+    p->state.batt_voltage_dv     = be16(&pl[0]);
+    p->state.batt_current_da     = be16(&pl[2]);
+    p->state.batt_used_mah       = be24(&pl[4]);
+    p->state.batt_remaining_pct  = pl[7];
+    p->state.batt_frame_ms       = now_ms();
+}
+
+static void decode_gps(crsf_parser_t *p, const uint8_t *pl, size_t len)
+{
+    if (len < 15) return;
+    p->state.gps_lat_1e7      = be32(&pl[0]);
+    p->state.gps_lon_1e7      = be32(&pl[4]);
+    p->state.gps_speed_kmh_d  = be16(&pl[8]);
+    p->state.gps_heading_cdeg = be16(&pl[10]);
+    /* Высота передаётся со смещением +1000 м, чтобы влезть в unsigned */
+    p->state.gps_alt_m        = (int32_t)be16(&pl[12]) - 1000;
+    p->state.gps_satellites   = pl[14];
+    p->state.gps_frame_ms     = now_ms();
+}
+
+static void decode_attitude(crsf_parser_t *p, const uint8_t *pl, size_t len)
+{
+    if (len < 6) return;
+    p->state.att_pitch_rad_1e4 = (int16_t)be16(&pl[0]);
+    p->state.att_roll_rad_1e4  = (int16_t)be16(&pl[2]);
+    p->state.att_yaw_rad_1e4   = (int16_t)be16(&pl[4]);
+    p->state.att_frame_ms      = now_ms();
+}
+
+static void decode_flight_mode(crsf_parser_t *p, const uint8_t *pl, size_t len)
+{
+    if (len == 0) return;
+    /* Строка в кадре заканчивается нулём, но доверять этому нельзя:
+     * обрезаем по длине payload и терминируем сами. */
+    size_t n = len < CRSF_FLIGHT_MODE_LEN - 1 ? len : CRSF_FLIGHT_MODE_LEN - 1;
+    size_t w = 0;
+    for (size_t i = 0; i < n && pl[i] != '\0'; i++) {
+        /* непечатаемое заменяем точкой, иначе мусор поедет в JSON */
+        p->state.flight_mode[w++] = (pl[i] >= 0x20 && pl[i] < 0x7F) ? (char)pl[i] : '.';
+    }
+    p->state.flight_mode[w] = '\0';
+    p->state.flight_mode_frame_ms = now_ms();
+}
+
+static void count_type(crsf_parser_t *p, uint8_t type)
+{
+    p->state.last_type = type;
+    for (uint8_t i = 0; i < p->state.type_slots_used; i++) {
+        if (p->state.type_counts[i].type == type) {
+            p->state.type_counts[i].count++;
+            return;
+        }
+    }
+    if (p->state.type_slots_used < CRSF_TYPE_SLOTS) {
+        uint8_t i = p->state.type_slots_used++;
+        p->state.type_counts[i].type  = type;
+        p->state.type_counts[i].count = 1;
+        return;
+    }
+    p->state.type_slots_overflow++;
+}
+
 static void process_frame(crsf_parser_t *p, const uint8_t *frame, size_t frame_len)
 {
     /* frame: [LEN][TYPE][PAYLOAD...][CRC8]  (без SYNC, он уже снят) */
@@ -83,6 +159,7 @@ static void process_frame(crsf_parser_t *p, const uint8_t *frame, size_t frame_l
     }
 
     p->state.rx_frames_total++;
+    count_type(p, type);
 
     switch (type) {
         case CRSF_FRAMETYPE_RC_CHANNELS_PACKED:
@@ -90,11 +167,23 @@ static void process_frame(crsf_parser_t *p, const uint8_t *frame, size_t frame_l
             break;
         case CRSF_FRAMETYPE_LINK_STATISTICS:
             decode_link_stats(p, payload, payload_len);
+            p->state.link_stats_frame_ms = now_ms();
+            break;
+        case CRSF_FRAMETYPE_BATTERY_SENSOR:
+            decode_battery(p, payload, payload_len);
+            break;
+        case CRSF_FRAMETYPE_GPS:
+            decode_gps(p, payload, payload_len);
+            break;
+        case CRSF_FRAMETYPE_ATTITUDE:
+            decode_attitude(p, payload, payload_len);
+            break;
+        case CRSF_FRAMETYPE_FLIGHT_MODE:
+            decode_flight_mode(p, payload, payload_len);
             break;
         default:
-            /* остальные типы (GPS, battery, device info, MSP, ...) —
-             * учитываются в rx_frames_total, детальный декод не
-             * требуется для transparent-моста (см. Этап 2 в README). */
+            /* device info, MSP, extended-кадры: подробный разбор мосту
+             * не нужен, но тип всё равно попадает в разрез count_type. */
             break;
     }
 }

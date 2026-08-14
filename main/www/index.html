@@ -49,7 +49,11 @@ table{width:100%;border-collapse:collapse;font-size:13px}
 td{padding:5px 4px;border-bottom:1px solid var(--line)}
 td:first-child{color:var(--mut);width:48%}
 .ch{display:inline-block;width:76px;margin:2px;font-size:11px;background:#0d1015;padding:3px 5px;border-radius:4px}
-.ok{color:var(--ok)}.err{color:var(--err)}.warn{color:var(--warn)}
+.ok{color:var(--ok)}.err{color:var(--err)}.warn{color:var(--warn)}.mut{color:var(--mut)}
+/* Бейдж типа кадра — в отличие от .ch ширина по содержимому: подписи
+   вроде "Link stats: 1234" в фиксированные 76px не помещаются. */
+.ty{display:inline-block;margin:2px;font-size:11px;background:#0d1015;
+    padding:3px 6px;border-radius:4px;white-space:nowrap}
 #toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:var(--panel);border:1px solid var(--line);padding:10px 18px;border-radius:6px;display:none;z-index:9}
 .warnbox{background:rgba(255,180,84,.1);border:1px solid var(--warn);color:var(--warn);padding:9px;border-radius:6px;font-size:12px;margin-bottom:12px}
 /* .hint вне .row: у существующего правила .row .hint выше специфичность, строки форм не затрагиваются */
@@ -606,6 +610,43 @@ async function poll(){
               onchange="setDump(${c.channel_id},this.checked)"></div>`).join('');
 
     document.getElementById('diagdetail').innerHTML=s.channels.map(c=>{
+      // Разрез по типам кадров: что реально идёт по линии.
+      const TYPE_NAMES={0x02:'GPS',0x08:'Батарея',0x14:'Link stats',0x16:'Канали',
+                        0x1E:'Attitude',0x21:'Режим',0x28:'Ping',0x29:'Device info',
+                        0x7A:'MSP req',0x7B:'MSP resp'};
+      const hex=v=>'0x'+v.toString(16).toUpperCase().padStart(2,'0');
+      function crsfTypes(cr){
+        if(!cr.types||!cr.types.length)return '<span class="mut">—</span>';
+        return cr.types.map(e=>`<span class="ty">${TYPE_NAMES[e.type]||hex(e.type)}: ${e.count}</span>`).join('')+
+               (cr.types_overflow?` <span class="warn">+${cr.types_overflow} поза таблицею</span>`:'');
+      }
+      // Телеметрия приходит встречным потоком из сети; *_ms=0 значит,
+      // что кадр такого типа не приходил ни разу — это не то же самое,
+      // что нулевое значение.
+      function crsfTele(n){
+        let r=`</table><h2 style="margin-top:10px">Телеметрія з мережі</h2><table>`+
+          row('Кадрів / CRC',n.rx_frames_total+' / '+
+              (n.crc_errors>0?`<span class="err">${n.crc_errors}</span>`:'0'))+
+          row('Останній тип',n.rx_frames_total?hex(n.last_type)+
+              (TYPE_NAMES[n.last_type]?' · '+TYPE_NAMES[n.last_type]:''):'—')+
+          row('Типи кадрів',crsfTypes(n));
+        if(n.link_stats_ms)r+=row('Downlink LQ / RSSI / SNR',
+              n.downlink_lq+' / '+n.downlink_rssi+' / '+n.downlink_snr)+
+          row('TX power / RF mode / антена',n.uplink_tx_power+' / '+n.rf_mode+' / '+n.active_antenna);
+        if(n.battery.ms)r+=row('Батарея',(n.battery.voltage_dv/10).toFixed(1)+' В · '+
+              (n.battery.current_da/10).toFixed(1)+' А · '+n.battery.used_mah+' мА·год · '+
+              n.battery.remaining_pct+'%');
+        if(n.gps.ms)r+=row('GPS',(n.gps.lat_1e7/1e7).toFixed(6)+', '+(n.gps.lon_1e7/1e7).toFixed(6))+
+          row('GPS швидк. / курс / висота',(n.gps.speed_kmh_d/10).toFixed(1)+' км/год · '+
+              (n.gps.heading_cdeg/100).toFixed(1)+'° · '+n.gps.alt_m+' м')+
+          row('Супутників',n.gps.satellites);
+        if(n.attitude.ms){const deg=v=>(v/10000*180/Math.PI).toFixed(1);
+          r+=row('Attitude pitch/roll/yaw',deg(n.attitude.pitch_1e4)+'° / '+
+              deg(n.attitude.roll_1e4)+'° / '+deg(n.attitude.yaw_1e4)+'°');}
+        if(n.flight_mode_ms)r+=row('Режим польоту',n.flight_mode||'—');
+        if(!n.rx_frames_total)r+=row('','<span class="mut">кадрів із мережі ще не було</span>');
+        return r;
+      }
       let t=`<div class="card" style="background:#0d1015"><h2>${c.name}</h2><table>`+
         row('Протокол',PROTOS[c.protocol])+row('RX / TX байт',c.rx_bytes+' / '+c.tx_bytes)+
         row('UART overruns',c.rx_overruns>0?`<span class="err">${c.rx_overruns}</span>`:'0')+
@@ -619,7 +660,9 @@ async function poll(){
         row('Помилок CRC',c.crsf.crc_errors>0?`<span class="err">${c.crsf.crc_errors}</span>`:'0')+
         row('Помилок синхронізації',c.crsf.sync_errors)+row('Некоректна довжина',c.crsf.bad_length_frames)+
         row('Failsafe',c.crsf.failsafe?'<span class="err">ТАК</span>':'ні')+
-        row('Uplink LQ / RSSI / SNR',c.crsf.uplink_lq+' / '+c.crsf.uplink_rssi+' / '+c.crsf.uplink_snr);}
+        row('Uplink LQ / RSSI / SNR',c.crsf.uplink_lq+' / '+c.crsf.uplink_rssi+' / '+c.crsf.uplink_snr)+
+        row('Типи кадрів',crsfTypes(c.crsf));}
+      if(c.crsf_from_net)t+=crsfTele(c.crsf_from_net);
       if(c.sbus){t+=row('S.Bus кадрів',c.sbus.rx_frames_total)+row('Помилок кадру',c.sbus.frame_errors)+
         row('Failsafe',c.sbus.failsafe?'<span class="err">ТАК</span>':'ні')+
         row('Frame lost',c.sbus.frame_lost?'<span class="warn">ТАК</span>':'ні')+

@@ -8,7 +8,8 @@ static const char *TAG = "routing";
 
 typedef struct {
     routing_cfg_t     cfg;
-    routing_parsers_t parsers;
+    routing_parsers_t parsers;      /* поток UART -> сеть */
+    routing_parsers_t net_parsers;  /* поток сеть -> UART (телеметрия) */
 } routing_channel_t;
 
 static routing_channel_t s_rt[UART_MGR_NUM_CHANNELS];
@@ -61,13 +62,48 @@ static void on_uart_rx(uint8_t channel_id, const uint8_t *data, size_t len, void
     }
 }
 
-/* сеть -> UART (прозрачно) */
+/* Колбэк passthrough из любого парсера -> запись в UART */
+static void passthrough_to_uart(uint8_t channel_id, const uint8_t *data, size_t len, void *ctx)
+{
+    (void)ctx;
+    if (channel_id >= UART_MGR_NUM_CHANNELS) return;
+    uart_manager_write(channel_id, data, len);
+}
+
+/* сеть -> протокол -> UART.
+ *
+ * Прозрачность сохраняется: парсер отдаёт байты в passthrough немедленно
+ * и без изменений, разбор идёт только ради диагностики. Отдельный набор
+ * парсеров нужен потому, что встречные потоки разные — с UART идут кадры
+ * каналов от пульта, из сети возвращается телеметрия, и складывать их в
+ * одну статистику значит не видеть ни того, ни другого. */
 static void on_net_rx(uint8_t channel_id, const uint8_t *data, size_t len, void *ctx)
 {
     (void)ctx;
     if (channel_id >= UART_MGR_NUM_CHANNELS) return;
-    if (!s_rt[channel_id].cfg.net_to_uart) return;
-    uart_manager_write(channel_id, data, len);
+    routing_channel_t *rt = &s_rt[channel_id];
+    if (!rt->cfg.net_to_uart) return;
+
+    uart_mgr_channel_cfg_t ucfg;
+    if (uart_manager_get_config(channel_id, &ucfg) != ESP_OK) {
+        uart_manager_write(channel_id, data, len);   /* конфиг недоступен — хотя бы не терять данные */
+        return;
+    }
+
+    switch (ucfg.protocol) {
+        case PROTO_MODE_CRSF:
+            crsf_parser_feed(&rt->net_parsers.crsf, channel_id, data, len, passthrough_to_uart, NULL);
+            break;
+        case PROTO_MODE_SBUS:
+            sbus_parser_feed(&rt->net_parsers.sbus, channel_id, data, len, passthrough_to_uart, NULL);
+            break;
+        case PROTO_MODE_MAVLINK:
+            mavlink_parser_feed(&rt->net_parsers.mavlink, channel_id, data, len, passthrough_to_uart, NULL);
+            break;
+        default:
+            raw_parser_feed(&rt->net_parsers.raw, channel_id, data, len, passthrough_to_uart, NULL);
+            break;
+    }
 }
 
 esp_err_t routing_manager_init(void)
@@ -98,4 +134,10 @@ const routing_parsers_t *routing_manager_get_parsers(uint8_t channel_id)
 {
     if (channel_id >= UART_MGR_NUM_CHANNELS) return NULL;
     return &s_rt[channel_id].parsers;
+}
+
+const routing_parsers_t *routing_manager_get_net_parsers(uint8_t channel_id)
+{
+    if (channel_id >= UART_MGR_NUM_CHANNELS) return NULL;
+    return &s_rt[channel_id].net_parsers;
 }

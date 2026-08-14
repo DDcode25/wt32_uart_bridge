@@ -200,6 +200,83 @@ void diagnostics_get_system(sys_diag_t *out)
     out->min_free_heap = esp_get_minimum_free_heap_size();
 }
 
+/* Сборка CRSF-статистики. Вынесена отдельно, потому что применяется к двум
+ * независимым потокам: UART->сеть и сеть->UART. Поля телеметрии отдаются
+ * "сырыми", в единицах протокола — перевод в вольты/градусы делает
+ * веб-интерфейс, чтобы на плате не заводить плавающую арифметику.
+ * Метки *_ms равны нулю, пока кадр такого типа не приходил ни разу; по ним
+ * интерфейс отличает "нет данных" от "ноль". */
+static cJSON *crsf_state_to_json(const crsf_state_t *st)
+{
+    cJSON *cr = cJSON_CreateObject();
+    cJSON_AddNumberToObject(cr, "rx_frames_total", st->rx_frames_total);
+    cJSON_AddNumberToObject(cr, "rx_frames_channels", st->rx_frames_channels);
+    cJSON_AddNumberToObject(cr, "crc_errors", st->crc_errors);
+    cJSON_AddNumberToObject(cr, "sync_errors", st->sync_errors);
+    cJSON_AddNumberToObject(cr, "last_addr", st->last_addr);
+    cJSON_AddNumberToObject(cr, "last_type", st->last_type);
+    cJSON_AddNumberToObject(cr, "bad_length_frames", st->short_or_long_frame_errors);
+    cJSON_AddBoolToObject(cr, "failsafe", st->failsafe_active);
+
+    cJSON_AddNumberToObject(cr, "uplink_lq", st->uplink_link_quality);
+    cJSON_AddNumberToObject(cr, "uplink_rssi", st->uplink_rssi_1);
+    cJSON_AddNumberToObject(cr, "uplink_snr", st->uplink_snr);
+    cJSON_AddNumberToObject(cr, "uplink_rssi_2", st->uplink_rssi_2);
+    cJSON_AddNumberToObject(cr, "uplink_tx_power", st->uplink_tx_power);
+    cJSON_AddNumberToObject(cr, "downlink_lq", st->downlink_link_quality);
+    cJSON_AddNumberToObject(cr, "downlink_rssi", st->downlink_rssi);
+    cJSON_AddNumberToObject(cr, "downlink_snr", st->downlink_snr);
+    cJSON_AddNumberToObject(cr, "active_antenna", st->active_antenna);
+    cJSON_AddNumberToObject(cr, "rf_mode", st->rf_mode);
+    cJSON_AddNumberToObject(cr, "link_stats_ms", st->link_stats_frame_ms);
+
+    cJSON *bat = cJSON_CreateObject();
+    cJSON_AddNumberToObject(bat, "voltage_dv", st->batt_voltage_dv);
+    cJSON_AddNumberToObject(bat, "current_da", st->batt_current_da);
+    cJSON_AddNumberToObject(bat, "used_mah", st->batt_used_mah);
+    cJSON_AddNumberToObject(bat, "remaining_pct", st->batt_remaining_pct);
+    cJSON_AddNumberToObject(bat, "ms", st->batt_frame_ms);
+    cJSON_AddItemToObject(cr, "battery", bat);
+
+    cJSON *gps = cJSON_CreateObject();
+    cJSON_AddNumberToObject(gps, "lat_1e7", st->gps_lat_1e7);
+    cJSON_AddNumberToObject(gps, "lon_1e7", st->gps_lon_1e7);
+    cJSON_AddNumberToObject(gps, "speed_kmh_d", st->gps_speed_kmh_d);
+    cJSON_AddNumberToObject(gps, "heading_cdeg", st->gps_heading_cdeg);
+    cJSON_AddNumberToObject(gps, "alt_m", st->gps_alt_m);
+    cJSON_AddNumberToObject(gps, "satellites", st->gps_satellites);
+    cJSON_AddNumberToObject(gps, "ms", st->gps_frame_ms);
+    cJSON_AddItemToObject(cr, "gps", gps);
+
+    cJSON *att = cJSON_CreateObject();
+    cJSON_AddNumberToObject(att, "pitch_1e4", st->att_pitch_rad_1e4);
+    cJSON_AddNumberToObject(att, "roll_1e4", st->att_roll_rad_1e4);
+    cJSON_AddNumberToObject(att, "yaw_1e4", st->att_yaw_rad_1e4);
+    cJSON_AddNumberToObject(att, "ms", st->att_frame_ms);
+    cJSON_AddItemToObject(cr, "attitude", att);
+
+    cJSON_AddStringToObject(cr, "flight_mode", st->flight_mode);
+    cJSON_AddNumberToObject(cr, "flight_mode_ms", st->flight_mode_frame_ms);
+
+    /* Разрез по типам кадров — главное для отладки: сразу видно, что
+     * реально идёт по линии, а не только суммарное число кадров. */
+    cJSON *types = cJSON_CreateArray();
+    for (uint8_t k = 0; k < st->type_slots_used; k++) {
+        cJSON *e = cJSON_CreateObject();
+        cJSON_AddNumberToObject(e, "type", st->type_counts[k].type);
+        cJSON_AddNumberToObject(e, "count", st->type_counts[k].count);
+        cJSON_AddItemToArray(types, e);
+    }
+    cJSON_AddItemToObject(cr, "types", types);
+    cJSON_AddNumberToObject(cr, "types_overflow", st->type_slots_overflow);
+
+    cJSON *chn = cJSON_CreateArray();
+    for (int k = 0; k < CRSF_NUM_CHANNELS; k++)
+        cJSON_AddItemToArray(chn, cJSON_CreateNumber(st->channels[k]));
+    cJSON_AddItemToObject(cr, "channels", chn);
+    return cr;
+}
+
 char *diagnostics_status_json(void)
 {
     cJSON *root = cJSON_CreateObject();
@@ -282,22 +359,12 @@ char *diagnostics_status_json(void)
         const routing_parsers_t *p = routing_manager_get_parsers(i);
         if (p) {
             if (ucfg.protocol == PROTO_MODE_CRSF) {
-                cJSON *cr = cJSON_CreateObject();
-                cJSON_AddNumberToObject(cr, "rx_frames_total", p->crsf.state.rx_frames_total);
-                cJSON_AddNumberToObject(cr, "rx_frames_channels", p->crsf.state.rx_frames_channels);
-                cJSON_AddNumberToObject(cr, "crc_errors", p->crsf.state.crc_errors);
-                cJSON_AddNumberToObject(cr, "sync_errors", p->crsf.state.sync_errors);
-                cJSON_AddNumberToObject(cr, "last_addr", p->crsf.state.last_addr);
-                cJSON_AddNumberToObject(cr, "bad_length_frames", p->crsf.state.short_or_long_frame_errors);
-                cJSON_AddBoolToObject(cr, "failsafe", p->crsf.state.failsafe_active);
-                cJSON_AddNumberToObject(cr, "uplink_lq", p->crsf.state.uplink_link_quality);
-                cJSON_AddNumberToObject(cr, "uplink_rssi", p->crsf.state.uplink_rssi_1);
-                cJSON_AddNumberToObject(cr, "uplink_snr", p->crsf.state.uplink_snr);
-                cJSON *chn = cJSON_CreateArray();
-                for (int k = 0; k < CRSF_NUM_CHANNELS; k++)
-                    cJSON_AddItemToArray(chn, cJSON_CreateNumber(p->crsf.state.channels[k]));
-                cJSON_AddItemToObject(cr, "channels", chn);
-                cJSON_AddItemToObject(c, "crsf", cr);
+                cJSON_AddItemToObject(c, "crsf", crsf_state_to_json(&p->crsf.state));
+                /* Встречный поток разбирается отдельным набором парсеров:
+                 * с UART идут команды, из сети возвращается телеметрия. */
+                const routing_parsers_t *np = routing_manager_get_net_parsers(i);
+                if (np) cJSON_AddItemToObject(c, "crsf_from_net",
+                                              crsf_state_to_json(&np->crsf.state));
             } else if (ucfg.protocol == PROTO_MODE_SBUS) {
                 cJSON *sb = cJSON_CreateObject();
                 cJSON_AddNumberToObject(sb, "rx_frames_total", p->sbus.state.rx_frames_total);
@@ -321,6 +388,14 @@ char *diagnostics_status_json(void)
                 cJSON_AddNumberToObject(mv, "last_compid", p->mavlink.state.last_compid);
                 cJSON_AddNumberToObject(mv, "last_msgid", p->mavlink.state.last_msgid);
                 cJSON_AddItemToObject(c, "mavlink", mv);
+                const routing_parsers_t *np = routing_manager_get_net_parsers(i);
+                if (np) {
+                    cJSON *mn = cJSON_CreateObject();
+                    cJSON_AddNumberToObject(mn, "rx_frames_v1", np->mavlink.state.rx_frames_v1);
+                    cJSON_AddNumberToObject(mn, "rx_frames_v2", np->mavlink.state.rx_frames_v2);
+                    cJSON_AddNumberToObject(mn, "frame_errors", np->mavlink.state.frame_errors);
+                    cJSON_AddItemToObject(c, "mavlink_from_net", mn);
+                }
             } else {
                 cJSON *rw = cJSON_CreateObject();
                 cJSON_AddNumberToObject(rw, "bytes_total", (double)p->raw.state.bytes_total);

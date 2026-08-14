@@ -37,6 +37,16 @@ extern "C" {
 #define CRSF_MAX_FRAME_LEN      64
 #define CRSF_NUM_CHANNELS       16
 
+/* Flight mode (0x21) — строка переменной длины, стандарт её не ограничивает,
+ * но реально это короткие идентификаторы вида "ACRO"/"MANUAL"/"!ERR". */
+#define CRSF_FLIGHT_MODE_LEN    16
+
+/* Сколько разных TYPE держать в разрезе счётчиков. Для отладки важно не
+ * «сколько всего кадров», а какие типы реально идут по линии, поэтому
+ * счётчики заводятся динамически по мере появления типов. Слотов с запасом
+ * на штатный набор телеметрии; переполнение учитывается отдельно. */
+#define CRSF_TYPE_SLOTS         14
+
 #define CRSF_FRAMETYPE_GPS              0x02
 #define CRSF_FRAMETYPE_BATTERY_SENSOR   0x08
 #define CRSF_FRAMETYPE_LINK_STATISTICS  0x14
@@ -64,6 +74,47 @@ typedef struct {
     uint8_t  downlink_rssi;
     uint8_t  downlink_link_quality;
     int8_t   downlink_snr;
+
+    /* --- Телеметрия. Декодируется только ради диагностики: на транзит
+     * байтов не влияет, кадры уходят дальше без изменений. Все
+     * многобайтовые поля в CRSF идут big-endian. --- */
+
+    /* Battery sensor (0x08) */
+    uint16_t batt_voltage_dv;      /* 0.1 В */
+    uint16_t batt_current_da;      /* 0.1 А */
+    uint32_t batt_used_mah;        /* 24 бита в кадре */
+    uint8_t  batt_remaining_pct;
+    uint32_t batt_frame_ms;        /* 0 = кадр ни разу не приходил */
+
+    /* GPS (0x02) */
+    int32_t  gps_lat_1e7;
+    int32_t  gps_lon_1e7;
+    uint16_t gps_speed_kmh_d;      /* 0.1 км/ч */
+    uint16_t gps_heading_cdeg;     /* 0.01 градуса */
+    int32_t  gps_alt_m;            /* метры, смещение 1000 уже снято */
+    uint8_t  gps_satellites;
+    uint32_t gps_frame_ms;
+
+    /* Attitude (0x1E) */
+    int16_t  att_pitch_rad_1e4;
+    int16_t  att_roll_rad_1e4;
+    int16_t  att_yaw_rad_1e4;
+    uint32_t att_frame_ms;
+
+    /* Flight mode (0x21) */
+    char     flight_mode[CRSF_FLIGHT_MODE_LEN];
+    uint32_t flight_mode_frame_ms;
+
+    uint32_t link_stats_frame_ms;
+
+    /* Разрез по типам кадров — что именно идёт по линии */
+    uint8_t  last_type;
+    struct {
+        uint8_t  type;
+        uint32_t count;
+    } type_counts[CRSF_TYPE_SLOTS];
+    uint8_t  type_slots_used;
+    uint32_t type_slots_overflow;  /* кадры типов, не влезших в таблицу */
 
     /* Статистика/диагностика */
     uint32_t rx_frames_total;

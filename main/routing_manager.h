@@ -41,8 +41,11 @@ esp_err_t routing_manager_init(void);
 esp_err_t routing_manager_apply_config(const routing_cfg_t *cfg);
 void      routing_manager_default_config(uint8_t channel_id, routing_cfg_t *out);
 
-/* Доступ к состоянию парсеров для web/diagnostics */
+/* Доступ к состоянию парсеров для web/diagnostics.
+ * get_parsers    — поток UART -> сеть (для CRSF это команды с пульта),
+ * get_net_parsers — поток сеть -> UART (телеметрия с той стороны). */
 const routing_parsers_t *routing_manager_get_parsers(uint8_t channel_id);
+const routing_parsers_t *routing_manager_get_net_parsers(uint8_t channel_id);
 
 #ifdef __cplusplus
 }
