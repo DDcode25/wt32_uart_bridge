@@ -30,3 +30,16 @@ idf_component_register(
         app_update    # esp_ota_ops.h для OTA через web
     EMBED_FILES "www/index.html"
 )
+
+# build_info.h пересоздаётся перед каждой сборкой: через idf.py — целью
+# ниже, через PlatformIO — extra_scripts из platformio.ini (там цели CMake
+# не выполняются, сборкой занимается SCons). Цель без OUTPUT считается
+# устаревшей всегда, поэтому отрабатывает на каждой сборке, а не только
+# при перенастройке CMake.
+add_custom_target(build_info_h ALL
+    COMMAND "${CMAKE_COMMAND}" -E env python3
+            "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/gen_build_info.py"
+    BYPRODUCTS "${CMAKE_CURRENT_SOURCE_DIR}/build_info.h"
+    COMMENT "Generating build_info.h"
+    VERBATIM)
+add_dependencies(${COMPONENT_LIB} build_info_h)

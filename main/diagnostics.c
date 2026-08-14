@@ -17,6 +17,7 @@
 #include "esp_app_desc.h"
 #include "esp_ota_ops.h"
 #include "cJSON.h"
+#include "build_info.h"   /* генерируется при сборке: версия и отметка времени */
 
 static const char *TAG = "diag";
 static bool s_verbose = true;
@@ -59,10 +60,15 @@ void diagnostics_get_firmware(fw_info_t *out)
     memset(out, 0, sizeof(*out));
 
     const esp_app_desc_t *d = esp_app_get_description();
-    out->version     = d->version;
+    /* Версия и отметка времени берутся из build_info.h, а не из
+     * дескриптора приложения: его трансляционная единица при
+     * инкрементальной сборке не перекомпилируется, и на плате оставались
+     * версия чужой ветки и дата первой сборки, хотя бинарь был свежий.
+     * build_info.h пересоздаётся на каждой сборке (main/CMakeLists.txt). */
+    out->version     = FIRMWARE_GIT_VERSION;
     out->project     = FIRMWARE_DISPLAY_NAME;
-    out->build_date  = d->date;
-    out->build_time  = d->time;
+    out->build_date  = FIRMWARE_BUILD_DATE;
+    out->build_time  = FIRMWARE_BUILD_TIME;
     out->idf_version = d->idf_ver;
 
     /* Восьми байт хватает, чтобы различить сборки глазами: полный хеш

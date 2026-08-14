@@ -15,3 +15,6 @@ test/test
 # абсолютные пути вида /home/<user>/.platformio/..., на другом компьютере
 # они не значат ничего. Файлы попали в репозиторий по недосмотру.
 .vscode/
+
+# Генерируется при сборке (scripts/gen_build_info.py)
+main/build_info.h
