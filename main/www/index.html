@@ -436,6 +436,11 @@ function render(){
      <label style="flex:0 0 auto"><input type="checkbox" id="c${c.channel_id}_u2n" ${c.uart_to_net?'checked':''}> UART→мережа</label>
      <label style="flex:0 0 auto"><input type="checkbox" id="c${c.channel_id}_n2u" ${c.net_to_uart?'checked':''}> мережа→UART</label>`+
      (c.protocol===1?`
+     <label style="flex:0 0 auto" title="Повторює останній кадр link stats, поки джерело мовчить. Обмежено вікном: після нього потік замовкає, щоб пульт побачив справжній обрив">
+       <input type="checkbox" id="c${c.channel_id}_hold" ${c.telemetry_hold_ms>0?'checked':''}> утримання телеметрії</label>
+     <label style="flex:0 0 auto" title="Вікно утримання від останнього справжнього кадру, мс. 0 вимикає">
+       вікно <input type="number" id="c${c.channel_id}_holdms" min="0" max="10000" step="100"
+                    value="${c.telemetry_hold_ms>0?c.telemetry_hold_ms:2000}" style="width:76px"> мс</label>
      <label style="flex:0 0 auto" title="Генератор додає власний потік поряд зі справжнім — на бойовому лінку не вмикати">
        <input type="checkbox" id="c${c.channel_id}_tnet" ${c.crsf_test_to_net?'checked':''}> тест CRSF→мережа</label>
      <label style="flex:0 0 auto" title="Синтетична телеметрія в пульт: link stats + батарея">
@@ -472,6 +477,12 @@ function collect(){
     if(g('c'+i+'_proto'))c.protocol=+g('c'+i+'_proto').value;
     if(g('c'+i+'_u2n')){c.uart_to_net=g('c'+i+'_u2n').checked;c.net_to_uart=g('c'+i+'_n2u').checked;}
     if(g('c'+i+'_tnet')){c.crsf_test_to_net=g('c'+i+'_tnet').checked;c.crsf_test_to_uart=g('c'+i+'_tuart').checked;}
+    // Нуль вимикає утримання, тому знята галочка і є вимкненням: саме
+    // значення вікна при цьому зберігається в полі, щоб не набирати знову.
+    if(g('c'+i+'_hold')){
+      const ms=parseInt(g('c'+i+'_holdms').value,10);
+      c.telemetry_hold_ms=g('c'+i+'_hold').checked?(isNaN(ms)?2000:Math.min(Math.max(ms,0),10000)):0;
+    }
   });
 }
 
