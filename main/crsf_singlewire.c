@@ -75,12 +75,24 @@ static void line_to_rx(void)
     s.stats.state = CRSF_SW_RX_LISTEN;
 }
 
-/* Кадр с провода: отдаём наружу целиком и без изменений. */
+/* Кадр с провода: отдаём наружу целиком и без изменений.
+ *
+ * Единственное, на что мост отвечает сам, — опрос устройств. Это разговор
+ * канального уровня с пультом, а не прикладные данные: пока пульт не
+ * получит ответ, он не считает нас модулем и шлёт опрос ВМЕСТО кадров
+ * управления (EdgeTX, pulses/crossfire.cpp — ветка queryCompleted). */
 static void on_frame(uint8_t channel_id, const uint8_t *frame, size_t len, void *ctx)
 {
     (void)channel_id; (void)ctx;
     s.stats.rx_frames++;
     s.stats.last_rx_ms = now_ms();
+
+    if (len >= 3 && frame[2] == CRSF_FRAMETYPE_DEVICE_PING) {
+        uint8_t info[CRSF_MAX_FRAME_LEN];
+        size_t n = crsf_build_device_info_frame(info, sizeof(info));
+        if (n && crsf_singlewire_send_frame(info, n) == ESP_OK) s.stats.pings_answered++;
+    }
+
     if (s.cb) s.cb(frame, len, s.cb_ctx);
 }
 

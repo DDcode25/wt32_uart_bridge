@@ -341,6 +341,48 @@ size_t crsf_build_link_stats_frame(const crsf_link_stats_t *ls, uint8_t *out_buf
     return 14;
 }
 
+size_t crsf_build_device_info_frame(uint8_t *out_buf, size_t out_buf_size)
+{
+    /* Ответ на PING_DEVICES (0x28). Пульт задаёт этот вопрос до тех пор,
+     * пока не получит ответ, и ВМЕСТО кадра каналов — см. EdgeTX,
+     * radio/src/pulses/crossfire.cpp: пока queryCompleted == false, в слот
+     * уходит createCrossfirePingFrame(). Флаг взводится единственным
+     * местом — разбором DEVICE_INFO с origin == MODULE_ADDRESS
+     * (radio/src/telemetry/crossfire.cpp). Без ответа пульт опрашивает нас
+     * вечно и тратит на это слоты управления.
+     *
+     * Раскладка payload по стандарту CRSF:
+     *   dest(1) origin(1) имя(N с нулём) serial(4) hw(4) sw(4) полей(1) вер(1)
+     * то есть LEN = N + 18. EdgeTX именно из этого и считает длину имени:
+     *   nameSize = rxBuffer[1] - 18
+     * и читает версию по смещениям 14..16 + nameSize.
+     *
+     * ВНИМАНИЕ: длина здесь не формальность. При LEN < 18 nameSize уходит
+     * в переполнение беззнакового, и пульт читает память за буфером —
+     * то есть кривой ответ роняет пульт, а не просто игнорируется. */
+    static const char name[] = "WT32BR";
+    const size_t n = sizeof(name);           /* вместе с нулём */
+    const size_t payload = 2 + n + 4 + 4 + 4 + 1 + 1;
+    const size_t total = payload + 4;        /* адрес + LEN + TYPE + payload + CRC */
+    if (out_buf_size < total) return 0;
+
+    uint8_t *p = out_buf;
+    *p++ = CRSF_SYNC_BYTE;
+    *p++ = (uint8_t)(payload + 2);           /* LEN = TYPE+payload+CRC = N+18 */
+    *p++ = CRSF_FRAMETYPE_DEVICE_INFO;
+    *p++ = CRSF_ADDR_RADIO_TRANSMITTER;      /* кому: пульту */
+    *p++ = CRSF_ADDR_CRSF_TRANSMITTER;       /* от кого: модуль, это проверяется */
+    memcpy(p, name, n); p += n;
+    memcpy(p, "WT32", 4); p += 4;            /* серийный: не "ELRS", чтобы пульт
+                                                не принял нас за ELRS-модуль */
+    *p++ = 0; *p++ = 0; *p++ = 0; *p++ = 1;  /* версия железа */
+    *p++ = 0; *p++ = 1; *p++ = 3; *p++ = 0;  /* версия ПО: 1.3.0 */
+    *p++ = 0;                                /* число настраиваемых полей */
+    *p++ = 0;                                /* версия протокола параметров */
+    *p   = crsf_crc8_dvb_s2(&out_buf[2], payload + 1);   /* TYPE+payload */
+    return total;
+}
+
 size_t crsf_build_gps_frame(int32_t lat_1e7, int32_t lon_1e7, uint16_t speed_ckmh,
                             uint16_t heading_cdeg, int32_t alt_m, uint8_t satellites,
                             uint8_t *out_buf, size_t out_buf_size)

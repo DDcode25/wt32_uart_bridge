@@ -189,6 +189,10 @@ size_t crsf_build_attitude_frame(int16_t pitch_rad_1e4, int16_t roll_rad_1e4,
                                  int16_t yaw_rad_1e4, uint8_t *out_buf, size_t out_buf_size);
 size_t crsf_build_flight_mode_frame(const char *mode, uint8_t *out_buf, size_t out_buf_size);
 
+/* Ответ на опрос устройств (0x28 -> 0x29). Пульт не считает мост модулем,
+ * пока не получит его, и до тех пор шлёт опрос вместо кадров управления. */
+size_t crsf_build_device_info_frame(uint8_t *out_buf, size_t out_buf_size);
+
 #ifdef __cplusplus
 }
 #endif
