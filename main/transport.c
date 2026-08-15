@@ -121,6 +121,25 @@ esp_err_t transport_send(uint8_t channel_id, const uint8_t *data, size_t len)
     return (udp_res == ESP_OK || tcp_res == ESP_OK) ? ESP_OK : ESP_FAIL;
 }
 
+esp_err_t transport_get_config(uint8_t channel_id, transport_cfg_t *out)
+{
+    if (channel_id >= 3) return ESP_ERR_INVALID_ARG;
+    *out = s_ch[channel_id].cfg;
+    return ESP_OK;
+}
+
+bool transport_udp_is_listening(uint8_t channel_id)
+{
+    if (channel_id >= 3) return false;
+    return s_ch[channel_id].udp_sock >= 0;
+}
+
+bool transport_tcp_is_listening(uint8_t channel_id)
+{
+    if (channel_id >= 3) return false;
+    return s_ch[channel_id].tcp_listen_sock >= 0;
+}
+
 esp_err_t transport_get_stats(uint8_t channel_id, transport_stats_t *out)
 {
     if (channel_id >= 3) return ESP_ERR_INVALID_ARG;

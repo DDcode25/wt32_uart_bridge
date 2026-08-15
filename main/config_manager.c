@@ -267,6 +267,41 @@ esp_err_t config_manager_validate(const app_config_t *cfg, char *reason, size_t 
         }
     }
 
+    /* Порты слушателей. Проверяется НЕЗАВИСИМО от uart.enabled: транспорт
+     * поднимается для всех каналов, выключенный UART свой порт не
+     * освобождает. Совпадение молча убивало второй канал — bind падал с
+     * EADDRINUSE, сокет оставался -1, отправка возвращала ошибку не считая
+     * пакетов, а сообщение уходило только в лог, невидимый пока UART0
+     * занят консолью. Со стороны это выглядело как сломанный протокол:
+     * кадры с провода разбираются, в сеть не уходит ничего. */
+    for (int i = 0; i < UART_MGR_NUM_CHANNELS; i++) {
+        const transport_cfg_t *a = &cfg->transport[i];
+        bool a_udp = (a->mode == NET_MODE_UDP || a->mode == NET_MODE_UDP_AND_TCP_SERVER);
+        bool a_tcp = (a->mode == NET_MODE_TCP_SERVER || a->mode == NET_MODE_UDP_AND_TCP_SERVER);
+
+        if (a_tcp && a->tcp_server_port == 80) {
+            return reject(reason, reason_len,
+                "%s: TCP-порт 80 зайнятий web-інтерфейсом", cfg->uart[i].name);
+        }
+
+        for (int j = i + 1; j < UART_MGR_NUM_CHANNELS; j++) {
+            const transport_cfg_t *b = &cfg->transport[j];
+            bool b_udp = (b->mode == NET_MODE_UDP || b->mode == NET_MODE_UDP_AND_TCP_SERVER);
+            bool b_tcp = (b->mode == NET_MODE_TCP_SERVER || b->mode == NET_MODE_UDP_AND_TCP_SERVER);
+
+            if (a_udp && b_udp && a->udp_listen_port && a->udp_listen_port == b->udp_listen_port) {
+                return reject(reason, reason_len,
+                    "UDP-порт %u зайнятий двічі: %s і %s (вимкнений UART порт не звільняє)",
+                    a->udp_listen_port, cfg->uart[i].name, cfg->uart[j].name);
+            }
+            if (a_tcp && b_tcp && a->tcp_server_port && a->tcp_server_port == b->tcp_server_port) {
+                return reject(reason, reason_len,
+                    "TCP-порт %u зайнятий двічі: %s і %s (вимкнений UART порт не звільняє)",
+                    a->tcp_server_port, cfg->uart[i].name, cfg->uart[j].name);
+            }
+        }
+    }
+
     if (reason && reason_len) reason[0] = '\0';
     return ESP_OK;
 }

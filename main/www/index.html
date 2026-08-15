@@ -617,6 +617,7 @@ async function poll(){
            <tr><td>UDP</td><td>${num(c.udp_rx_packets)} пак.</td><td>${num(c.udp_tx_packets)} пак.</td></tr>
            <tr><td>TCP</td><td>${num(c.tcp_rx_bytes)} Б</td><td>${num(c.tcp_tx_bytes)} Б</td></tr>
          </table>
+         ${c.net_ok===false?'<div class="err">слухач не піднявся — порт зайнятий іншим каналом (вимкнений UART порт не звільняє)</div>':''}
          <span class="hint">TCP клієнтів: ${c.tcp_clients}${c.udp_rx_dropped?` · UDP відкинуто: ${num(c.udp_rx_dropped)}`:''}${c.rx_overruns?` · <span class="err">UART overruns: ${num(c.rx_overruns)}</span>`:''}</span>
        </div>`).join('');
 
@@ -673,6 +674,8 @@ async function poll(){
         row('Протокол',PROTOS[c.protocol])+row('RX / TX байт',c.rx_bytes+' / '+c.tx_bytes)+
         row('UART overruns',c.rx_overruns>0?`<span class="err">${c.rx_overruns}</span>`:'0')+
         row('UDP пакетів rx/tx',c.udp_rx_packets+' / '+c.udp_tx_packets)+
+        row('UDP слухач',c.udp_listening?'<span class="ok">піднято</span>':
+            (c.net_ok===false?'<span class="err">не піднято — порт зайнятий</span>':'<span class="mut">не використовується</span>'))+
         row('UDP відкинуто',c.udp_rx_dropped)+
         row('TCP байт rx/tx',c.tcp_rx_bytes+' / '+c.tcp_tx_bytes)+
         row('TCP клієнтів',c.tcp_clients)+

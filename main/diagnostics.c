@@ -361,6 +361,19 @@ char *diagnostics_status_json(void)
         cJSON_AddNumberToObject(c, "tcp_clients", tst.tcp_clients_connected);
         cJSON_AddNumberToObject(c, "last_net_rx_ms", tst.last_net_rx_ms);
 
+        /* Чего от транспорта хотели и что вышло: расхождение означает
+         * занятый порт, и без этой пары признаков канал выглядит просто
+         * молчащим. */
+        transport_cfg_t tcfg;
+        transport_get_config(i, &tcfg);
+        bool want_udp = (tcfg.mode == NET_MODE_UDP || tcfg.mode == NET_MODE_UDP_AND_TCP_SERVER);
+        bool want_tcp = (tcfg.mode == NET_MODE_TCP_SERVER || tcfg.mode == NET_MODE_UDP_AND_TCP_SERVER);
+        cJSON_AddBoolToObject(c, "udp_listening", transport_udp_is_listening(i));
+        cJSON_AddBoolToObject(c, "tcp_listening", transport_tcp_is_listening(i));
+        cJSON_AddBoolToObject(c, "net_ok",
+                              want_udp == transport_udp_is_listening(i) &&
+                              want_tcp == transport_tcp_is_listening(i));
+
         /* Протокольная статистика */
         const routing_parsers_t *p = routing_manager_get_parsers(i);
         if (p) {

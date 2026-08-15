@@ -74,6 +74,14 @@ esp_err_t transport_register_rx_cb(uint8_t channel_id, transport_net_rx_cb_t cb,
 esp_err_t transport_send(uint8_t channel_id, const uint8_t *data, size_t len);
 
 esp_err_t transport_get_stats(uint8_t channel_id, transport_stats_t *out);
+esp_err_t transport_get_config(uint8_t channel_id, transport_cfg_t *out);
+
+/* Поднялся ли слушатель НА САМОМ ДЕЛЕ. Настройка говорит, чего от канала
+ * хотели, а это — что получилось: bind() падает при занятом порте, и до
+ * появления этих признаков единственным следом была строка в логе,
+ * недоступная пока UART0 отдан консоли. */
+bool transport_udp_is_listening(uint8_t channel_id);
+bool transport_tcp_is_listening(uint8_t channel_id);
 void transport_default_config(uint8_t channel_id, transport_cfg_t *out);
 
 #ifdef __cplusplus
