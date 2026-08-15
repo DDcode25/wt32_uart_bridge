@@ -21,6 +21,13 @@ typedef struct {
     uint32_t skipped_bytes;
 } dump_state_t;
 
+/* Порция очереди передачи. Длинная посылка режется на несколько, задача
+ * передачи склеит их обратно перед выходом в провод. */
+typedef struct {
+    uint16_t len;
+    uint8_t  data[UART_MGR_TX_BLOCK_BYTES];
+} uart_tx_block_t;
+
 typedef struct {
     uart_mgr_channel_cfg_t cfg;
     uart_mgr_stats_t stats;
@@ -30,6 +37,8 @@ typedef struct {
     uart_mgr_rx_cb_t rx_cb;
     void *rx_cb_ctx;
     TaskHandle_t rx_task_handle;
+    TaskHandle_t tx_task_handle;
+    QueueHandle_t tx_queue;
     bool driver_installed;
     SemaphoreHandle_t lock;
 } uart_channel_t;
@@ -175,6 +184,83 @@ static void dump_bytes(uart_channel_t *ch, dump_state_t *st, const char *dir,
     }
 }
 
+/* Сколько миллисекунд посылка физически уходит в провод.
+ *
+ * Раньше здесь стоял плоский потолок в 50 мс на любую посылку. Он задумывался
+ * как страховка от залипшего передатчика, но на практике определял темп:
+ * ожидание отрабатывало целиком, и канал вырождался в двадцать посылок в
+ * секунду независимо от скорости. Считаем честно по числу бит, а прежний
+ * потолок оставляем именно страховкой. */
+static uint32_t tx_drain_timeout_ms(const uart_mgr_channel_cfg_t *cfg, size_t len)
+{
+    uint32_t data_bits = 5 + (uint32_t)cfg->data_bits;               /* enum: 0 -> 5 бит */
+    uint32_t stop_bits = (cfg->stop_bits == UART_STOPBITS_2) ? 2 : 1;
+    uint32_t per_byte  = 1 + data_bits + (cfg->parity ? 1 : 0) + stop_bits;
+    uint32_t baud      = cfg->baud_rate ? cfg->baud_rate : 9600;
+
+    uint32_t ms = (uint32_t)(((uint64_t)len * per_byte * 1000) / baud) + 2;
+    if (ms > UART_MGR_SINGLE_WIRE_TX_TIMEOUT_MS) ms = UART_MGR_SINGLE_WIRE_TX_TIMEOUT_MS;
+    return ms;
+}
+
+/* Физическая посылка. Вызывается ТОЛЬКО из задачи передачи. */
+static void tx_write_now(uart_channel_t *ch, const uint8_t *data, size_t len)
+{
+    uart_port_t port = channel_to_port(ch->cfg.channel_id);
+    bool single_wire = (ch->cfg.duplex == UART_DUPLEX_HALF_SINGLE_WIRE);
+
+    if (single_wire) single_wire_tx_attach(ch->cfg.tx_gpio, port);
+
+    int written = uart_write_bytes(port, (const char *)data, len);
+
+    if (single_wire) {
+        /* Отпустить линию можно только после того, как последний байт
+         * реально ушёл: uart_write_bytes лишь кладёт данные в кольцевой
+         * буфер драйвера. */
+        uart_wait_tx_done(port, pdMS_TO_TICKS(tx_drain_timeout_ms(&ch->cfg, len)));
+        single_wire_tx_release(ch->cfg.tx_gpio);
+
+        /* На одном проводе приёмник слышит собственную посылку. Выкидываем
+         * её, иначе своё же эхо разбирается как входящий кадр и уходит
+         * обратно в сеть. Гонку с задачей приёма это не закрывает
+         * полностью — часть эха она может успеть забрать раньше, — но
+         * парсер такой мусор отбрасывает и ресинхронизируется. Заодно
+         * теряется то немногое, что пришло с линии за время посылки. */
+        uart_flush_input(port);
+    }
+
+    if (written > 0) {
+        xSemaphoreTake(ch->lock, portMAX_DELAY);
+        ch->stats.tx_bytes += written;
+        xSemaphoreGive(ch->lock);
+        dump_bytes(ch, &ch->dump_tx, "TX", data, (size_t)written);
+    }
+}
+
+static void tx_task(void *arg)
+{
+    uart_channel_t *ch = (uart_channel_t *)arg;
+    uart_tx_block_t blk;
+    uint8_t batch[UART_MGR_TX_BATCH_BYTES];
+
+    while (1) {
+        if (xQueueReceive(ch->tx_queue, &blk, portMAX_DELAY) != pdTRUE) continue;
+
+        size_t n = blk.len;
+        memcpy(batch, blk.data, blk.len);
+
+        /* Всё, что уже стоит в очереди, уходит одним разворотом линии.
+         * Ждать ради этого нечего: берём только накопленное. */
+        while (n + UART_MGR_TX_BLOCK_BYTES <= sizeof(batch) &&
+               xQueueReceive(ch->tx_queue, &blk, 0) == pdTRUE) {
+            memcpy(batch + n, blk.data, blk.len);
+            n += blk.len;
+        }
+
+        tx_write_now(ch, batch, n);
+    }
+}
+
 static void rx_task(void *arg)
 {
     uart_channel_t *ch = (uart_channel_t *)arg;
@@ -214,6 +300,14 @@ static esp_err_t stop_channel(uart_channel_t *ch)
     if (ch->rx_task_handle) {
         vTaskDelete(ch->rx_task_handle);
         ch->rx_task_handle = NULL;
+    }
+    if (ch->tx_task_handle) {
+        vTaskDelete(ch->tx_task_handle);
+        ch->tx_task_handle = NULL;
+    }
+    if (ch->tx_queue) {
+        vQueueDelete(ch->tx_queue);
+        ch->tx_queue = NULL;
     }
     if (ch->driver_installed) {
         uart_port_t port = channel_to_port(ch->cfg.channel_id);
@@ -327,6 +421,21 @@ esp_err_t uart_manager_apply_config(const uart_mgr_channel_cfg_t *cfg)
     }
 
     char task_name[24];
+
+    ch->tx_queue = xQueueCreate(UART_MGR_TX_QUEUE_DEPTH, sizeof(uart_tx_block_t));
+    if (!ch->tx_queue) {
+        ESP_LOGE(TAG, "failed to create tx queue for channel %d", cfg->channel_id);
+        return ESP_ERR_NO_MEM;
+    }
+    snprintf(task_name, sizeof(task_name), "uart%d_tx", cfg->channel_id);
+    /* Приоритет выше приёма из сети (транспорт держит 9), но ниже приёма с
+     * провода: провод ждать не умеет, сеть подождёт в очереди. */
+    if (xTaskCreatePinnedToCore(tx_task, task_name, 3072, ch, 11,
+                                &ch->tx_task_handle, tskNO_AFFINITY) != pdPASS) {
+        ESP_LOGE(TAG, "failed to create tx task for channel %d", cfg->channel_id);
+        return ESP_FAIL;
+    }
+
     snprintf(task_name, sizeof(task_name), "uart%d_rx", cfg->channel_id);
     BaseType_t ok = xTaskCreatePinnedToCore(rx_task, task_name, 4096, ch,
                                              /* CRSF/S.Bus получают чуть более высокий приоритет */
@@ -365,36 +474,28 @@ esp_err_t uart_manager_write(uint8_t channel_id, const uint8_t *data, size_t len
     if (channel_id >= UART_MGR_NUM_CHANNELS) return ESP_ERR_INVALID_ARG;
     uart_channel_t *ch = &s_channels[channel_id];
     if (!ch->driver_installed) return ESP_ERR_INVALID_STATE;
-    uart_port_t port = channel_to_port(channel_id);
-    bool single_wire = (ch->cfg.duplex == UART_DUPLEX_HALF_SINGLE_WIRE);
+    if (!ch->tx_queue) return ESP_ERR_INVALID_STATE;
 
-    if (single_wire) single_wire_tx_attach(ch->cfg.tx_gpio, port);
+    /* Только очередь — никаких ожиданий провода в вызывающей задаче.
+     * Вызов приходит из приёма сети и из фоновых задач, и блокировка здесь
+     * стоила бы потерянных датаграмм в буфере сокета. */
+    size_t sent = 0;
+    while (sent < len) {
+        uart_tx_block_t blk;
+        size_t part = len - sent;
+        if (part > UART_MGR_TX_BLOCK_BYTES) part = UART_MGR_TX_BLOCK_BYTES;
+        blk.len = (uint16_t)part;
+        memcpy(blk.data, data + sent, part);
 
-    int written = uart_write_bytes(port, (const char *)data, len);
-
-    if (single_wire) {
-        /* Отпустить линию можно только после того, как последний байт
-         * реально ушёл: uart_write_bytes лишь кладёт данные в кольцевой
-         * буфер драйвера. */
-        uart_wait_tx_done(port, pdMS_TO_TICKS(UART_MGR_SINGLE_WIRE_TX_TIMEOUT_MS));
-        single_wire_tx_release(ch->cfg.tx_gpio);
-
-        /* На одном проводе приёмник слышит собственную посылку. Выкидываем
-         * её, иначе своё же эхо разбирается как входящий кадр и уходит
-         * обратно в сеть. Гонку с задачей приёма это не закрывает
-         * полностью — часть эха она может успеть забрать раньше, — но
-         * парсер такой мусор отбрасывает и ресинхронизируется. Заодно
-         * теряется то немногое, что пришло с линии за время посылки. */
-        uart_flush_input(port);
+        if (xQueueSend(ch->tx_queue, &blk, 0) != pdTRUE) {
+            xSemaphoreTake(ch->lock, portMAX_DELAY);
+            ch->stats.tx_dropped += (uint32_t)(len - sent);
+            xSemaphoreGive(ch->lock);
+            return ESP_FAIL;
+        }
+        sent += part;
     }
-
-    if (written > 0) {
-        xSemaphoreTake(ch->lock, portMAX_DELAY);
-        ch->stats.tx_bytes += written;
-        xSemaphoreGive(ch->lock);
-        dump_bytes(ch, &ch->dump_tx, "TX", data, (size_t)written);
-    }
-    return (written == (int)len) ? ESP_OK : ESP_FAIL;
+    return ESP_OK;
 }
 
 esp_err_t uart_manager_set_dump(uint8_t channel_id, bool enabled)

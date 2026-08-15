@@ -351,6 +351,7 @@ char *diagnostics_status_json(void)
         cJSON_AddNumberToObject(c, "rx_bytes", (double)ust.rx_bytes);
         cJSON_AddNumberToObject(c, "tx_bytes", (double)ust.tx_bytes);
         cJSON_AddNumberToObject(c, "rx_overruns", ust.rx_overruns);
+        cJSON_AddNumberToObject(c, "tx_dropped", ust.tx_dropped);
         cJSON_AddNumberToObject(c, "last_rx_time_ms", ust.last_rx_time_ms);
 
         cJSON_AddNumberToObject(c, "udp_rx_packets", tst.udp_rx_packets);

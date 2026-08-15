@@ -673,6 +673,7 @@ async function poll(){
       let t=`<div class="card" style="background:#0d1015"><h2>${c.name}</h2><table>`+
         row('Протокол',PROTOS[c.protocol])+row('RX / TX байт',c.rx_bytes+' / '+c.tx_bytes)+
         row('UART overruns',c.rx_overruns>0?`<span class="err">${c.rx_overruns}</span>`:'0')+
+        row('Відкинуто на передачу',c.tx_dropped>0?`<span class="err">${num(c.tx_dropped)} Б — дріт повільніший за джерело</span>`:'0')+
         row('UDP пакетів rx/tx',c.udp_rx_packets+' / '+c.udp_tx_packets)+
         row('UDP слухач',c.udp_listening?'<span class="ok">піднято</span>':
             (c.net_ok===false?'<span class="err">не піднято — порт зайнятий</span>':'<span class="mut">не використовується</span>'))+
