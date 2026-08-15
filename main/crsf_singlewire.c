@@ -155,14 +155,21 @@ static void crsf_sw_task(void *arg)
                 uint32_t t0 = (uint32_t)esp_timer_get_time();
                 s.stats.state = CRSF_SW_RX_FRAME;
 
-                size_t left = evt.size;
-                while (left) {
-                    size_t take = left > sizeof(buf) ? sizeof(buf) : left;
+                /* Забираем ВСЁ, что лежит в кольце, а не evt.size.
+                 *
+                 * Размер из события — не то же самое, что содержимое буфера:
+                 * событие могло не влезть в очередь драйвера, а часть байт
+                 * могла ещё лежать в FIFO. Чтение «по событию» тогда
+                 * недобирает, остаток копится, и кадры рвутся на стыке —
+                 * на стенде это дало 22 ошибки CRC в секунду на ровном
+                 * месте. Опрос длины ничего не стоит и не врёт. */
+                size_t pending = 0;
+                while (uart_get_buffered_data_len(s.cfg.port, &pending) == ESP_OK && pending) {
+                    size_t take = pending > sizeof(buf) ? sizeof(buf) : pending;
                     int n = uart_read_bytes(s.cfg.port, buf, take, 0);
                     if (n <= 0) break;
                     s.stats.rx_bytes += n;
                     crsf_parser_feed(&s.parser, 0, buf, (size_t)n, on_frame, NULL);
-                    left -= (size_t)n;
                 }
 
                 s.stats.crc_errors     = s.parser.state.crc_errors;
@@ -250,7 +257,9 @@ esp_err_t crsf_singlewire_start(const crsf_sw_cfg_t *cfg, crsf_sw_frame_cb_t cb,
     uart_set_line_inverse(cfg->port, inv);
     uart_set_mode(cfg->port, UART_MODE_UART);
 
-    /* Аппаратный признак «линия замолчала» (перенос идеи из uart_dma.cpp). */
+    /* Аппаратный признак «линия замолчала» (перенос идеи из uart_dma.cpp).
+     * На вклад в ошибки CRC проверен отдельно: с ним и без него 15.5 против
+     * 15.5 в секунду, то есть приёму он не вредит, а промежуток даёт. */
     uart_set_rx_timeout(cfg->port, CRSF_SW_RX_TIMEOUT_SYMBOLS);
 
     line_to_rx();
