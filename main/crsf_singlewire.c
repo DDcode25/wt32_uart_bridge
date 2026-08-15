@@ -87,7 +87,7 @@ static void on_frame(uint8_t channel_id, const uint8_t *frame, size_t len, void 
     s.stats.rx_frames++;
     s.stats.last_rx_ms = now_ms();
 
-    if (len >= 3 && frame[2] == CRSF_FRAMETYPE_DEVICE_PING) {
+    if (!s.cfg.raw && len >= 3 && frame[2] == CRSF_FRAMETYPE_DEVICE_PING) {
         uint8_t info[CRSF_MAX_FRAME_LEN];
         size_t n = crsf_build_device_info_frame(info, sizeof(info));
         if (n && crsf_singlewire_send_frame(info, n) == ESP_OK) s.stats.pings_answered++;
@@ -196,7 +196,16 @@ static void crsf_sw_task(void *arg)
                     int n = uart_read_bytes(s.cfg.port, buf, take, 0);
                     if (n <= 0) break;
                     s.stats.rx_bytes += n;
-                    crsf_parser_feed(&s.parser, 0, buf, (size_t)n, on_frame, NULL);
+                    if (s.cfg.raw) {
+                        /* Ни разбора, ни проверок: байты уходят как есть.
+                         * Момент для ответа задаёт не кадр, а конец пачки —
+                         * его драйвер отмечает аппаратным таймаутом приёма. */
+                        s.stats.rx_frames++;
+                        s.stats.last_rx_ms = now_ms();
+                        if (s.cb) s.cb(buf, (size_t)n, s.cb_ctx);
+                    } else {
+                        crsf_parser_feed(&s.parser, 0, buf, (size_t)n, on_frame, NULL);
+                    }
                 }
 
                 s.stats.crc_errors     = s.parser.state.crc_errors;
@@ -314,7 +323,8 @@ esp_err_t crsf_singlewire_start(const crsf_sw_cfg_t *cfg, crsf_sw_frame_cb_t cb,
     ESP_LOGI(TAG, "CRSF SingleWire initialized");
     ESP_LOGI(TAG, "  GPIO: %d", cfg->gpio);
     ESP_LOGI(TAG, "  Baud: %lu", (unsigned long)cfg->baud);
-    ESP_LOGI(TAG, "  Mode: Half Duplex%s", cfg->invert ? " (inverted)" : "");
+    ESP_LOGI(TAG, "  Mode: Half Duplex%s%s", cfg->invert ? " (inverted)" : "",
+             cfg->raw ? ", RAW passthrough" : "");
     ESP_LOGI(TAG, "  UART: UART%d", (int)cfg->port);
     return ESP_OK;
 }
@@ -335,14 +345,17 @@ bool crsf_singlewire_running(void) { return s.running; }
 esp_err_t crsf_singlewire_send_frame(const uint8_t *frame, size_t len)
 {
     if (!s.running || !s.tx_queue) return ESP_ERR_INVALID_STATE;
-    if (!frame || len < 4 || len > CRSF_MAX_FRAME_LEN) return ESP_ERR_INVALID_SIZE;
+    if (!frame || len == 0 || len > CRSF_MAX_FRAME_LEN) return ESP_ERR_INVALID_SIZE;
 
-    /* В линию не должно уходить то, что мы сами испортили: длина обязана
-     * сойтись с заявленной, а CRC — с содержимым. */
-    uint8_t declared = frame[1];
-    if ((size_t)declared + 2 != len) return ESP_ERR_INVALID_ARG;
-    if (crsf_crc8_dvb_s2(&frame[2], (size_t)declared - 1) != frame[len - 1]) {
-        return ESP_ERR_INVALID_CRC;
+    if (!s.cfg.raw) {
+        /* В линию не должно уходить то, что мы сами испортили: длина обязана
+         * сойтись с заявленной, а CRC — с содержимым. */
+        if (len < 4) return ESP_ERR_INVALID_SIZE;
+        uint8_t declared = frame[1];
+        if ((size_t)declared + 2 != len) return ESP_ERR_INVALID_ARG;
+        if (crsf_crc8_dvb_s2(&frame[2], (size_t)declared - 1) != frame[len - 1]) {
+            return ESP_ERR_INVALID_CRC;
+        }
     }
 
     tx_frame_t f;

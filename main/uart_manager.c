@@ -507,12 +507,17 @@ esp_err_t uart_manager_apply_config(const uart_mgr_channel_cfg_t *cfg)
      * линии, событийный приём и своя state machine направления. Обычный
      * путь с двумя задачами для этого режима не годится — приём и
      * передача здесь не независимы. */
-    if (cfg->protocol == PROTO_MODE_CRSF && cfg->duplex == UART_DUPLEX_HALF_SINGLE_WIRE) {
+    if ((cfg->protocol == PROTO_MODE_CRSF || cfg->protocol == PROTO_MODE_RAW) &&
+        cfg->duplex == UART_DUPLEX_HALF_SINGLE_WIRE) {
         crsf_sw_cfg_t sw = {
             .port   = port,
             .gpio   = cfg->tx_gpio,
             .baud   = cfg->baud_rate,
             .invert = (cfg->invert_rx || cfg->invert_tx),
+            /* RAW на одном проводе — тот же физический слой, но мост
+             * становится прозрачным: ничего не разбирает и ничего не
+             * добавляет от себя. */
+            .raw    = (cfg->protocol == PROTO_MODE_RAW),
         };
         esp_err_t swerr = crsf_singlewire_start(&sw, crsf_sw_frame, ch);
         if (swerr != ESP_OK) {
