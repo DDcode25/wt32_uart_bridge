@@ -301,12 +301,16 @@ const NETMODES=["Вимкнено","UDP","TCP server","TCP client","UDP + TCP se
    для одной физической линии — приглашение задать их разными и потом
    искать, почему канал молчит. */
 function syncOneWire(id){
-  const dup=g('c'+id+'_dup'), rxrow=g('c'+id+'_rxrow'), txlbl=g('c'+id+'_txlbl');
+  /* Свой getElementById, а не помощник g(): тот объявлен ЛОКАЛЬНО внутри
+     collect(), и обращение к нему отсюда роняло отрисовку форм целиком —
+     страницы UART1 и UART2 оставались пустыми. */
+  const el=i=>document.getElementById(i);
+  const dup=el('c'+id+'_dup'), rxrow=el('c'+id+'_rxrow'), txlbl=el('c'+id+'_txlbl');
   if(!dup||!rxrow||!txlbl)return;
   const one=(+dup.value===1);
   rxrow.style.display=one?'none':'';
   txlbl.textContent=one?'CRSF GPIO (один провід)':'TX GPIO';
-  if(one){const rx=g('c'+id+'_rx'),tx=g('c'+id+'_tx');if(rx&&tx)rx.value=tx.value;}
+  if(one){const rx=el('c'+id+'_rx'),tx=el('c'+id+'_tx');if(rx&&tx)rx.value=tx.value;}
 }
 const PARITY=["None","Even","Odd"];const STOP=["1","1.5","2"];const DUPLEX=["Full duplex","Half / single-wire","RS-485 half-duplex"];
 let cfg=null;
