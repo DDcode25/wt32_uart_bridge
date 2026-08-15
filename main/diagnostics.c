@@ -394,6 +394,7 @@ char *diagnostics_status_json(void)
             cJSON_AddNumberToObject(j, "rx_overflow", sw.rx_overflow);
             cJSON_AddNumberToObject(j, "tx_queue_drops", sw.tx_queue_drops);
             cJSON_AddNumberToObject(j, "collisions", sw.collisions);
+            cJSON_AddNumberToObject(j, "echo_mismatches", sw.echo_mismatches);
             cJSON_AddNumberToObject(j, "rx_to_tx_switches", sw.rx_to_tx_switches);
             cJSON_AddNumberToObject(j, "tx_to_rx_switches", sw.tx_to_rx_switches);
             cJSON_AddNumberToObject(j, "last_rx_ms", sw.last_rx_ms);

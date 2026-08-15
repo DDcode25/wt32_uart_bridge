@@ -72,6 +72,7 @@ typedef struct {
     uint32_t rx_overflow;        /* UART_FIFO_OVF + UART_BUFFER_FULL */
     uint32_t tx_queue_drops;     /* устаревшие кадры, вытесненные свежими */
     uint32_t collisions;         /* передача отменена: линия занята */
+    uint32_t echo_mismatches;    /* своё эхо вернулось искажённым */
     uint32_t rx_to_tx_switches;
     uint32_t tx_to_rx_switches;
     uint32_t last_rx_ms;
