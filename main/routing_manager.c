@@ -63,9 +63,17 @@ static void on_uart_rx(uint8_t channel_id, const uint8_t *data, size_t len, void
     if (uart_manager_get_config(channel_id, &ucfg) != ESP_OK) return;
 
     switch (ucfg.protocol) {
-        case PROTO_MODE_CRSF:
+        case PROTO_MODE_CRSF: {
+            /* Конец разобранного кадра = начало межкадровой паузы. Это
+             * единственный момент, когда на общем проводе можно ответить,
+             * не попав поверх чужой передачи. */
+            uint32_t frames_before = rt->parsers.crsf.state.rx_frames_total;
             crsf_parser_feed(&rt->parsers.crsf, channel_id, data, len, passthrough_to_net, NULL);
+            if (rt->parsers.crsf.state.rx_frames_total != frames_before) {
+                uart_manager_notify_line_free(channel_id);
+            }
             break;
+        }
         case PROTO_MODE_SBUS:
             sbus_parser_feed(&rt->parsers.sbus, channel_id, data, len, passthrough_to_net, NULL);
             break;

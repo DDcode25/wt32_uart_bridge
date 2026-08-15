@@ -297,22 +297,33 @@ static void rx_task(void *arg)
     uint32_t wait_ms = single_wire ? UART_MGR_SINGLE_WIRE_GAP_WAIT_MS : UART_MGR_RX_WAIT_MS;
 
     while (1) {
-        int len = uart_read_bytes(port, buf, sizeof(buf), pdMS_TO_TICKS(wait_ms));
-
-        /* Признак промежутка: байты ТОЛЬКО ЧТО пришли и на этом кончились.
-         * Значит прочитан хвост кадра и дальше линия свободна.
-         *
-         * Одного «буфер пуст» мало, это проверено на стенде: при опросе раз
-         * в 2 мс и кадре раз в 4 мс буфер пуст почти всегда — и в паузе, и
-         * за миг до начала следующего кадра. Сигнал срабатывал постоянно,
-         * посылка уходила куда попало, и ошибки на приёме с пульта не упали
-         * вовсе (13 CRC/с против 10 без синхронизации). */
-        if (single_wire && len > 0 && ch->tx_task_handle) {
-            size_t pending = 0;
-            if (uart_get_buffered_data_len(port, &pending) == ESP_OK && pending == 0) {
-                xTaskNotifyGive(ch->tx_task_handle);
+        int len;
+        if (single_wire) {
+            /* Забираем ровно накопленное и сразу возвращаемся.
+             *
+             * uart_read_bytes() с длиной 64 ждёт, пока их наберётся, и
+             * отдаёт данные с опозданием до собственного таймаута. На общем
+             * проводе это опоздание и есть потерянная точность: к моменту
+             * разбора кадра линия успевает уйти под следующий. Опрос раз в
+             * тик стоит дёшево, зато хвост кадра попадает в разбор почти
+             * сразу за последним битом. */
+            size_t avail = 0;
+            if (uart_get_buffered_data_len(port, &avail) != ESP_OK || avail == 0) {
+                vTaskDelay(1);
+                continue;
             }
+            if (avail > sizeof(buf)) avail = sizeof(buf);
+            len = uart_read_bytes(port, buf, avail, 0);
+        } else {
+            len = uart_read_bytes(port, buf, sizeof(buf), pdMS_TO_TICKS(wait_ms));
         }
+
+        /* Признак промежутка сюда больше не встроен: отсюда его видно
+         * слишком грубо. И «короткое чтение», и «буфер пуст» срабатывали
+         * почти на каждом опросе — при кадре раз в 4 мс это попадало в
+         * паузу не чаще случайного, и ошибки на приёме не падали вовсе.
+         * Теперь момент задаёт разбор: кадр дособран — линия свободна,
+         * см. uart_manager_notify_line_free(). */
 
         /* Съесть эхо собственной посылки: на одном проводе оно приходит
          * первым и ровно той же длины. Дальше в том же чтении может лежать
@@ -531,6 +542,14 @@ esp_err_t uart_manager_apply_config(const uart_mgr_channel_cfg_t *cfg)
              cfg->channel_id, cfg->name, cfg->rx_gpio, cfg->tx_gpio,
              (unsigned long)cfg->baud_rate, cfg->protocol);
     return ESP_OK;
+}
+
+void uart_manager_notify_line_free(uint8_t channel_id)
+{
+    if (channel_id >= UART_MGR_NUM_CHANNELS) return;
+    uart_channel_t *ch = &s_channels[channel_id];
+    if (ch->cfg.duplex != UART_DUPLEX_HALF_SINGLE_WIRE) return;
+    if (ch->tx_task_handle) xTaskNotifyGive(ch->tx_task_handle);
 }
 
 esp_err_t uart_manager_get_config(uint8_t channel_id, uart_mgr_channel_cfg_t *out_cfg)
