@@ -44,6 +44,43 @@ typedef struct {
     uint8_t  last_compid;
     uint32_t last_msgid;
     uint32_t last_frame_ms;
+
+    /* --- разобранная телеметрия ---
+     *
+     * Разбираются ЧЕТЫРЕ сообщения, а не весь протокол: их хватает, чтобы
+     * собрать телеметрию CRSF для пульта, и они есть у любого автопилота.
+     * Смещения полей взяты из штатной раскладки MAVLink (поля идут по
+     * убыванию размера) и подписаны прямо у разбора — генерировать сотни
+     * XML-дефайнов ради четырёх сообщений незачем.
+     *
+     * Метки *_ms равны нулю, пока сообщение не приходило ни разу: это не
+     * то же самое, что нулевое значение, и по ним видно, чего борт не
+     * отдаёт вовсе. */
+    uint16_t batt_voltage_mv;
+    int16_t  batt_current_ca;      /* 10 мА */
+    int32_t  batt_used_mah;
+    int8_t   batt_remaining_pct;   /* -1 = автопилот не знает */
+    uint32_t batt_ms;
+
+    int32_t  gps_lat_1e7;
+    int32_t  gps_lon_1e7;
+    int32_t  gps_alt_mm;           /* над уровнем моря */
+    uint16_t gps_vel_cms;
+    uint16_t gps_cog_cdeg;
+    uint8_t  gps_fix_type;
+    uint8_t  gps_satellites;
+    uint32_t gps_ms;
+
+    float    att_roll_rad;
+    float    att_pitch_rad;
+    float    att_yaw_rad;
+    uint32_t att_ms;
+
+    uint32_t hb_custom_mode;
+    uint8_t  hb_base_mode;
+    uint8_t  hb_system_status;
+    bool     hb_armed;
+    uint32_t hb_ms;
 } mavlink_state_t;
 
 typedef struct {

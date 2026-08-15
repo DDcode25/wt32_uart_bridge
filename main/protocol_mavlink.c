@@ -2,11 +2,104 @@
 #include "protocol_mavlink.h"
 #include "esp_timer.h"
 
-#define MAVLINK_HEARTBEAT_MSGID 0
+#define MAVLINK_HEARTBEAT_MSGID     0
+#define MAVLINK_SYS_STATUS_MSGID    1
+#define MAVLINK_GPS_RAW_INT_MSGID   24
+#define MAVLINK_ATTITUDE_MSGID      30
+#define MAVLINK_BATTERY_STATUS_MSGID 147
 
 void mavlink_parser_init(mavlink_parser_t *p)
 {
     memset(p, 0, sizeof(*p));
+}
+
+/* Поля MAVLink идут little-endian и упакованы без выравнивания. */
+static uint16_t le16(const uint8_t *p) { return (uint16_t)(p[0] | (p[1] << 8)); }
+static uint32_t le32(const uint8_t *p)
+{
+    return (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
+}
+static float lefloat(const uint8_t *p)
+{
+    uint32_t bits = le32(p);
+    float f;
+    memcpy(&f, &bits, sizeof(f));
+    return f;
+}
+
+/* Разбор полезной нагрузки. Общий для v1 и v2: раскладка полей одна и та
+ * же, отличается только заголовок кадра.
+ *
+ * ВНИМАНИЕ на укорочённые кадры: MAVLink v2 обрезает хвостовые нулевые
+ * байты, поэтому payload_len может быть меньше штатной длины сообщения.
+ * Каждое поле берётся только если оно целиком попало в присланное, иначе
+ * читались бы чужие байты. */
+static void decode_payload(mavlink_parser_t *p, uint32_t msgid,
+                           const uint8_t *pl, size_t len)
+{
+    uint32_t now = (uint32_t)(esp_timer_get_time() / 1000);
+
+    switch (msgid) {
+        case MAVLINK_HEARTBEAT_MSGID:
+            /* custom_mode u32 @0, type @4, autopilot @5, base_mode @6, system_status @7 */
+            if (len >= 8) {
+                p->state.hb_custom_mode   = le32(&pl[0]);
+                p->state.hb_base_mode     = pl[6];
+                p->state.hb_system_status = pl[7];
+                /* MAV_MODE_FLAG_SAFETY_ARMED */
+                p->state.hb_armed         = (pl[6] & 0x80) != 0;
+                p->state.hb_ms            = now;
+            }
+            break;
+
+        case MAVLINK_SYS_STATUS_MSGID:
+            /* voltage_battery u16 @14, current_battery i16 @16, battery_remaining i8 @30 */
+            if (len >= 18) {
+                p->state.batt_voltage_mv = le16(&pl[14]);
+                p->state.batt_current_ca = (int16_t)le16(&pl[16]);
+                p->state.batt_ms         = now;
+            }
+            if (len >= 31) p->state.batt_remaining_pct = (int8_t)pl[30];
+            break;
+
+        case MAVLINK_BATTERY_STATUS_MSGID:
+            /* current_consumed i32 @0 — единственный источник израсходованной
+             * ёмкости: в SYS_STATUS её нет вовсе. */
+            if (len >= 4) {
+                p->state.batt_used_mah = (int32_t)le32(&pl[0]);
+                p->state.batt_ms       = now;
+            }
+            if (len >= 36) p->state.batt_remaining_pct = (int8_t)pl[35];
+            break;
+
+        case MAVLINK_GPS_RAW_INT_MSGID:
+            /* time_usec u64 @0, lat @8, lon @12, alt @16, eph @20, epv @22,
+             * vel @24, cog @26, fix_type @28, satellites_visible @29 */
+            if (len >= 28) {
+                p->state.gps_lat_1e7  = (int32_t)le32(&pl[8]);
+                p->state.gps_lon_1e7  = (int32_t)le32(&pl[12]);
+                p->state.gps_alt_mm   = (int32_t)le32(&pl[16]);
+                p->state.gps_vel_cms  = le16(&pl[24]);
+                p->state.gps_cog_cdeg = le16(&pl[26]);
+                p->state.gps_ms       = now;
+            }
+            if (len >= 29) p->state.gps_fix_type   = pl[28];
+            if (len >= 30) p->state.gps_satellites = pl[29];
+            break;
+
+        case MAVLINK_ATTITUDE_MSGID:
+            /* time_boot_ms u32 @0, roll @4, pitch @8, yaw @12 (радианы) */
+            if (len >= 16) {
+                p->state.att_roll_rad  = lefloat(&pl[4]);
+                p->state.att_pitch_rad = lefloat(&pl[8]);
+                p->state.att_yaw_rad   = lefloat(&pl[12]);
+                p->state.att_ms        = now;
+            }
+            break;
+
+        default:
+            break;
+    }
 }
 
 static void process_v1(mavlink_parser_t *p, const uint8_t *f, size_t total_len)
@@ -29,7 +122,7 @@ static void process_v1(mavlink_parser_t *p, const uint8_t *f, size_t total_len)
         p->state.last_heartbeat_sysid = sysid;
         p->state.last_heartbeat_compid = compid;
     }
-    (void)payload_len;
+    decode_payload(p, msgid, &f[6], payload_len);
 }
 
 static void process_v2(mavlink_parser_t *p, const uint8_t *f, size_t total_len)
@@ -52,6 +145,7 @@ static void process_v2(mavlink_parser_t *p, const uint8_t *f, size_t total_len)
         p->state.last_heartbeat_sysid = sysid;
         p->state.last_heartbeat_compid = compid;
     }
+    decode_payload(p, msgid, &f[10], f[1]);
 }
 
 static size_t frame_total_len(const uint8_t *buf, size_t have)

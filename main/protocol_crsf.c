@@ -306,6 +306,78 @@ size_t crsf_build_link_stats_frame(const crsf_link_stats_t *ls, uint8_t *out_buf
     return 14;
 }
 
+size_t crsf_build_gps_frame(int32_t lat_1e7, int32_t lon_1e7, uint16_t speed_ckmh,
+                            uint16_t heading_cdeg, int32_t alt_m, uint8_t satellites,
+                            uint8_t *out_buf, size_t out_buf_size)
+{
+    /* ADDR LEN TYPE [15 байт] CRC = 19 байт, всё big-endian. Единицы те же,
+     * что читает decode_gps — иначе разбор собственного кадра дал бы другие
+     * числа, чем в него положили. */
+    if (out_buf_size < 19) return 0;
+
+    /* Высота едет со смещением +1000 м в unsigned; за пределами диапазона
+     * упираем в край, а не заворачиваем. */
+    int32_t alt_field = alt_m + 1000;
+    if (alt_field < 0) alt_field = 0;
+    if (alt_field > 65535) alt_field = 65535;
+
+    out_buf[0] = CRSF_SYNC_BYTE;
+    out_buf[1] = 17;                  /* TYPE(1) + payload(15) + CRC(1) */
+    out_buf[2] = CRSF_FRAMETYPE_GPS;
+    out_buf[3] = (uint8_t)(((uint32_t)lat_1e7 >> 24) & 0xFF);
+    out_buf[4] = (uint8_t)(((uint32_t)lat_1e7 >> 16) & 0xFF);
+    out_buf[5] = (uint8_t)(((uint32_t)lat_1e7 >> 8) & 0xFF);
+    out_buf[6] = (uint8_t)((uint32_t)lat_1e7 & 0xFF);
+    out_buf[7] = (uint8_t)(((uint32_t)lon_1e7 >> 24) & 0xFF);
+    out_buf[8] = (uint8_t)(((uint32_t)lon_1e7 >> 16) & 0xFF);
+    out_buf[9] = (uint8_t)(((uint32_t)lon_1e7 >> 8) & 0xFF);
+    out_buf[10] = (uint8_t)((uint32_t)lon_1e7 & 0xFF);
+    out_buf[11] = (uint8_t)(speed_ckmh >> 8);
+    out_buf[12] = (uint8_t)(speed_ckmh & 0xFF);
+    out_buf[13] = (uint8_t)(heading_cdeg >> 8);
+    out_buf[14] = (uint8_t)(heading_cdeg & 0xFF);
+    out_buf[15] = (uint8_t)(((uint16_t)alt_field) >> 8);
+    out_buf[16] = (uint8_t)(((uint16_t)alt_field) & 0xFF);
+    out_buf[17] = satellites;
+    out_buf[18] = crsf_crc8_dvb_s2(&out_buf[2], 16);   /* TYPE+payload */
+    return 19;
+}
+
+size_t crsf_build_attitude_frame(int16_t pitch_rad_1e4, int16_t roll_rad_1e4,
+                                 int16_t yaw_rad_1e4, uint8_t *out_buf, size_t out_buf_size)
+{
+    /* ADDR LEN TYPE [6 байт] CRC = 10 байт. Порядок именно pitch, roll, yaw —
+     * не тот, к которому тянет рука. */
+    if (out_buf_size < 10) return 0;
+    out_buf[0] = CRSF_SYNC_BYTE;
+    out_buf[1] = 8;                   /* TYPE(1) + payload(6) + CRC(1) */
+    out_buf[2] = CRSF_FRAMETYPE_ATTITUDE;
+    out_buf[3] = (uint8_t)(((uint16_t)pitch_rad_1e4) >> 8);
+    out_buf[4] = (uint8_t)(((uint16_t)pitch_rad_1e4) & 0xFF);
+    out_buf[5] = (uint8_t)(((uint16_t)roll_rad_1e4) >> 8);
+    out_buf[6] = (uint8_t)(((uint16_t)roll_rad_1e4) & 0xFF);
+    out_buf[7] = (uint8_t)(((uint16_t)yaw_rad_1e4) >> 8);
+    out_buf[8] = (uint8_t)(((uint16_t)yaw_rad_1e4) & 0xFF);
+    out_buf[9] = crsf_crc8_dvb_s2(&out_buf[2], 7);     /* TYPE+payload */
+    return 10;
+}
+
+size_t crsf_build_flight_mode_frame(const char *mode, uint8_t *out_buf, size_t out_buf_size)
+{
+    if (!mode) return 0;
+    size_t n = strnlen(mode, CRSF_FLIGHT_MODE_LEN - 1);
+    /* ADDR LEN TYPE [строка + '\0'] CRC */
+    size_t total = 4 + n + 1;
+    if (out_buf_size < total) return 0;
+    out_buf[0] = CRSF_SYNC_BYTE;
+    out_buf[1] = (uint8_t)(n + 3);    /* TYPE(1) + строка + '\0' + CRC(1) */
+    out_buf[2] = CRSF_FRAMETYPE_FLIGHT_MODE;
+    memcpy(&out_buf[3], mode, n);
+    out_buf[3 + n] = '\0';
+    out_buf[4 + n] = crsf_crc8_dvb_s2(&out_buf[2], n + 2);
+    return total;
+}
+
 size_t crsf_build_battery_frame(int16_t voltage_dv, int16_t current_da,
                                 uint32_t used_mah, uint8_t remaining_pct,
                                 uint8_t *out_buf, size_t out_buf_size)

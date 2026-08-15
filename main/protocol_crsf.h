@@ -173,12 +173,19 @@ typedef struct {
     int8_t  downlink_snr;
 } crsf_link_stats_t;
 
-/* Сборка телеметрийных кадров для тестового генератора. Возвращают длину
- * кадра целиком (адрес..CRC) либо 0, если буфер мал. */
+/* Сборка телеметрийных кадров: тестовым генератором и переводом телеметрии
+ * из MAVLink. Возвращают длину кадра целиком (адрес..CRC) либо 0, если
+ * буфер мал. Единицы полей совпадают с теми, что читают декодеры выше. */
 size_t crsf_build_link_stats_frame(const crsf_link_stats_t *ls, uint8_t *out_buf, size_t out_buf_size);
 size_t crsf_build_battery_frame(int16_t voltage_dv, int16_t current_da,
                                 uint32_t used_mah, uint8_t remaining_pct,
                                 uint8_t *out_buf, size_t out_buf_size);
+size_t crsf_build_gps_frame(int32_t lat_1e7, int32_t lon_1e7, uint16_t speed_ckmh,
+                            uint16_t heading_cdeg, int32_t alt_m, uint8_t satellites,
+                            uint8_t *out_buf, size_t out_buf_size);
+size_t crsf_build_attitude_frame(int16_t pitch_rad_1e4, int16_t roll_rad_1e4,
+                                 int16_t yaw_rad_1e4, uint8_t *out_buf, size_t out_buf_size);
+size_t crsf_build_flight_mode_frame(const char *mode, uint8_t *out_buf, size_t out_buf_size);
 
 #ifdef __cplusplus
 }
