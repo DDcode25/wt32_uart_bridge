@@ -45,7 +45,7 @@ extern "C" {
  * Если автопилот замолчал дольше срока годности, мост замолкает тоже:
  * показывать оператору последние известные цифры при оборванной связи с
  * бортом опаснее, чем честно потерять телеметрию. */
-#define ROUTING_MAV_TELEM_HZ        8
+#define ROUTING_MAV_TELEM_HZ        25
 #define ROUTING_MAV_TELEM_FRESH_MS  3000
 
 typedef struct {

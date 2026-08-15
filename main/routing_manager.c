@@ -224,6 +224,9 @@ static void mavlink_telemetry_to_crsf(routing_channel_t *rt, uint8_t crsf_channe
         if (ucfg.protocol != PROTO_MODE_MAVLINK || !ucfg.enabled) continue;
 
         const mavlink_state_t *st = &s_rt[i].parsers.mavlink.state;
+        /* Свежесть меряется по ЛЮБОМУ кадру автопилота, а не по телеметрии:
+         * борт может не отдавать GPS или батарею, но пока он говорит —
+         * он жив. */
         if (st->last_frame_ms && (now - st->last_frame_ms) < ROUTING_MAV_TELEM_FRESH_MS) {
             mv = st;
             break;
@@ -243,16 +246,28 @@ static void mavlink_telemetry_to_crsf(routing_channel_t *rt, uint8_t crsf_channe
     uint32_t phase = rt->mav_telem_phase++;
     switch ((phase & 1) ? 0 : (1 + (phase / 2) % 3)) {
         case 0: {
-            /* Статистика связи — то самое, по чему пульт судит, есть
-             * телеметрия или нет. Настоящих радиоцифр у моста нет: линк
-             * здесь Ethernet, и он либо есть целиком, либо его нет вовсе.
-             * Поэтому отдаём заведомо полную связь, а качество реального
-             * канала видно по счётчикам на странице платы. */
+            /* Статистика связи — то, по чему пульт судит, жива ли связь с
+             * бортом, и по чему оператор принимает решения в полёте.
+             * Поэтому она обязана отражать РЕАЛЬНОЕ состояние борта, а не
+             * состояние Ethernet.
+             *
+             * Сначала здесь стояла постоянная сотня: линк-де либо есть, либо
+             * нет. На стенде это дало ровно то, чего нельзя допускать —
+             * пульт показывал исправную связь с уже выключенным дроном.
+             * Теперь качество падает вслед за возрастом последнего кадра с
+             * автопилота: свежий поток — сотня, дальше линейно до нуля к
+             * границе годности. Оператор видит, что борт замолкает, до
+             * того как телеметрия пропадёт совсем. */
+            uint32_t age = now - mv->last_frame_ms;
+            uint32_t lq  = (age >= ROUTING_MAV_TELEM_FRESH_MS) ? 0
+                         : 100 - (age * 100 / ROUTING_MAV_TELEM_FRESH_MS);
+
             crsf_link_stats_t ls = {
-                .uplink_rssi_1 = 40, .uplink_rssi_2 = 40, .uplink_lq = 100,
+                .uplink_rssi_1 = 40, .uplink_rssi_2 = 40,
+                .uplink_lq = (uint8_t)lq,
                 .uplink_snr = 20, .active_antenna = 0, .rf_mode = 2,
                 .uplink_tx_power = 3, .downlink_rssi = 40,
-                .downlink_lq = 100, .downlink_snr = 20,
+                .downlink_lq = (uint8_t)lq, .downlink_snr = 20,
             };
             n = crsf_build_link_stats_frame(&ls, frame, sizeof(frame));
             break;
