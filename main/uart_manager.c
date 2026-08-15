@@ -39,10 +39,13 @@ typedef struct {
     TaskHandle_t rx_task_handle;
     TaskHandle_t tx_task_handle;
     QueueHandle_t tx_queue;
-    /* Однопроводный режим: сколько байт собственной посылки ещё предстоит
-     * услышать и выбросить. Ровно столько, сколько передали. */
-    volatile uint32_t echo_bytes;
-    volatile uint32_t echo_deadline_ms;   /* после него долг сгорает */
+    /* Однопроводный режим: что именно мы передали и сколько этого уже
+     * опознано во входящем потоке. Сравнение идёт ПО СОДЕРЖИМОМУ, см.
+     * eat_own_echo(). */
+    uint8_t  echo_buf[UART_MGR_TX_BATCH_BYTES];
+    volatile uint32_t echo_len;
+    volatile uint32_t echo_pos;
+    volatile uint32_t echo_deadline_ms;
     bool driver_installed;
     SemaphoreHandle_t lock;
 } uart_channel_t;
@@ -188,6 +191,44 @@ static void dump_bytes(uart_channel_t *ch, dump_state_t *st, const char *dir,
     }
 }
 
+/* Выбросить из принятого собственную посылку — но только ту её часть,
+ * которая ДЕЙСТВИТЕЛЬНО совпадает с переданным.
+ *
+ * Считать байты и вычитать их вслепую нельзя. Эхо на общем проводе может и
+ * не вернуться: приёмник был занят своей же передачей, буфер сбросился,
+ * встречный конец придержал линию. Тогда вычитание съедает чужие байты и
+ * рвёт чужие кадры — на стенде каждая наша посылка стоила примерно 1.3
+ * кадра пульта, что вчетверо дороже самих столкновений и не лечилось ни
+ * синхронизацией с паузой, ни сроком годности долга.
+ *
+ * Сравнение по содержимому решает это без догадок: совпало — наше, не
+ * совпало — чужое, отдаём разбору целиком. */
+static int eat_own_echo(uart_channel_t *ch, uint8_t *buf, int len)
+{
+    if (ch->echo_pos >= ch->echo_len) return len;
+
+    /* Просроченное эхо уже не придёт: дальше по проводу идут чужие байты. */
+    if ((uint32_t)(esp_timer_get_time() / 1000) > ch->echo_deadline_ms) {
+        ch->echo_len = ch->echo_pos = 0;
+        return len;
+    }
+
+    int i = 0;
+    while (i < len && ch->echo_pos < ch->echo_len && buf[i] == ch->echo_buf[ch->echo_pos]) {
+        i++;
+        ch->echo_pos++;
+    }
+    if (i < len && ch->echo_pos < ch->echo_len) {
+        /* Разошлось на середине — остальное точно не наше. */
+        ch->echo_len = ch->echo_pos = 0;
+    }
+    if (i > 0) {
+        len -= i;
+        if (len > 0) memmove(buf, buf + i, (size_t)len);
+    }
+    return len;
+}
+
 /* Физическая посылка. Вызывается ТОЛЬКО из задачи передачи. */
 static void tx_write_now(uart_channel_t *ch, const uint8_t *data, size_t len)
 {
@@ -231,15 +272,13 @@ static void tx_write_now(uart_channel_t *ch, const uint8_t *data, size_t len)
          * потока управления), а при сотне посылок в секунду он вдобавок
          * сносил вместе с эхом всю встречную телеметрию. */
         if (written > 0) {
-            ch->echo_bytes += (uint32_t)written;
+            size_t n = (size_t)written < sizeof(ch->echo_buf) ? (size_t)written : sizeof(ch->echo_buf);
+            memcpy(ch->echo_buf, data, n);
+            ch->echo_len = (uint32_t)n;
+            ch->echo_pos = 0;
             ch->echo_deadline_ms = (uint32_t)(esp_timer_get_time() / 1000)
                                    + UART_MGR_ECHO_DEBT_MS;
         }
-
-        /* Эхо могло и не дойти — приёмный буфер переполнился, линию
-         * придержал другой конец. Не даём долгу расти без предела, иначе
-         * счёт съест уже настоящую телеметрию. */
-        if (ch->echo_bytes > UART_MGR_TX_BATCH_BYTES) ch->echo_bytes = (uint32_t)written;
     }
 
     if (written > 0) {
@@ -266,6 +305,15 @@ static void tx_task(void *arg)
             uint32_t now = (uint32_t)(esp_timer_get_time() / 1000);
             uint32_t last_rx = ch->stats.last_rx_time_ms;
             if (last_rx && (now - last_rx) < UART_MGR_PEER_QUIET_MS) {
+                /* Сбросить накопленное и ждать СЛЕДУЮЩИЙ кадр.
+                 *
+                 * Разбор уведомляет на каждый кадр — 250 раз в секунду, а
+                 * посылок у нас восемь. Без сброса счётчик уведомлений
+                 * практически всегда ненулевой, ulTaskNotifyTake()
+                 * возвращается мгновенно по устаревшему сигналу, и вся
+                 * синхронизация превращается в её отсутствие: именно поэтому
+                 * разворот по кадру поначалу не снизил ошибки ни на кадр. */
+                ulTaskNotifyTake(pdTRUE, 0);
                 ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(UART_MGR_SINGLE_WIRE_GAP_LIMIT_MS));
             }
         }
@@ -328,25 +376,7 @@ static void rx_task(void *arg)
         /* Съесть эхо собственной посылки: на одном проводе оно приходит
          * первым и ровно той же длины. Дальше в том же чтении может лежать
          * уже настоящий встречный поток — его отдаём как обычно. */
-        /* Долг по эху живёт считанные миллисекунды.
-         *
-         * Своя посылка возвращается сразу же — на 400000 бод это доли
-         * миллисекунды. Если за окно она не пришла, значит и не придёт:
-         * приёмник был занят, буфер сбросился, другой конец придержал
-         * линию. Бессрочный долг в этом случае съедает УЖЕ ЧУЖИЕ байты и
-         * рвёт чужие кадры — на стенде это стоило пяти-шести кадров пульта
-         * в секунду, вчетверо больше, чем сами столкновения. */
-        if (ch->echo_bytes &&
-            (uint32_t)(esp_timer_get_time() / 1000) > ch->echo_deadline_ms) {
-            ch->echo_bytes = 0;
-        }
-
-        if (len > 0 && ch->echo_bytes) {
-            uint32_t eat = (uint32_t)len < ch->echo_bytes ? (uint32_t)len : ch->echo_bytes;
-            ch->echo_bytes -= eat;
-            len -= (int)eat;
-            if (len > 0) memmove(buf, buf + eat, (size_t)len);
-        }
+        if (single_wire && len > 0) len = eat_own_echo(ch, buf, len);
 
         if (len > 0) {
             xSemaphoreTake(ch->lock, portMAX_DELAY);
@@ -520,9 +550,18 @@ esp_err_t uart_manager_apply_config(const uart_mgr_channel_cfg_t *cfg)
         return ESP_ERR_NO_MEM;
     }
     snprintf(task_name, sizeof(task_name), "uart%d_tx", cfg->channel_id);
-    /* Приоритет выше приёма из сети (транспорт держит 9), но ниже приёма с
-     * провода: провод ждать не умеет, сеть подождёт в очереди. */
-    if (xTaskCreatePinnedToCore(tx_task, task_name, 3072, ch, 11,
+    /* На одном проводе передача идёт ВЫШЕ приёма.
+     *
+     * Отвечать можно только в промежутке между чужими кадрами, а он длится
+     * 3.35 мс. Сигнал «кадр дособран» рождается в задаче приёма, и если она
+     * приоритетнее, то после сигнала продолжает работать сама: дочитывает,
+     * разбирает, отправляет в сеть. Передача получала процессор с задержкой,
+     * сравнимой с самим промежутком, и посылка всё равно накрывала чужой
+     * кадр — на стенде это стоило одной испорченной посылки на каждую
+     * отправленную. Для полнодуплексных каналов очередь прежняя: там спешить
+     * некуда. */
+    UBaseType_t tx_prio = (cfg->duplex == UART_DUPLEX_HALF_SINGLE_WIRE) ? 13 : 11;
+    if (xTaskCreatePinnedToCore(tx_task, task_name, 3072, ch, tx_prio,
                                 &ch->tx_task_handle, tskNO_AFFINITY) != pdPASS) {
         ESP_LOGE(TAG, "failed to create tx task for channel %d", cfg->channel_id);
         return ESP_FAIL;
