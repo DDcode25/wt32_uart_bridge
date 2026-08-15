@@ -273,7 +273,10 @@ static void mavlink_telemetry_to_crsf(routing_channel_t *rt, uint8_t crsf_channe
             break;
         }
         case 1:
-            if (!mv->batt_ms) return;
+            /* Ноль вольт — это не «разряжено», это «автопилот не знает».
+             * Пульт заводит по телеметрии датчики и показывает их
+             * оператору; выдумывать за борт нельзя. */
+            if (!mv->batt_ms || mv->batt_voltage_mv == 0) return;
             n = crsf_build_battery_frame((int16_t)(mv->batt_voltage_mv / 100),
                                          (int16_t)(mv->batt_current_ca / 10),
                                          (uint32_t)(mv->batt_used_mah > 0 ? mv->batt_used_mah : 0),
@@ -288,7 +291,11 @@ static void mavlink_telemetry_to_crsf(routing_channel_t *rt, uint8_t crsf_channe
                                           frame, sizeof(frame));
             break;
         case 3:
-            if (!mv->gps_ms) return;
+            /* Без фикса координаты равны нулю, а ноль на широте и долготе —
+             * это точка в Атлантике у берегов Африки. Пульт покажет её как
+             * место борта и уведёт оператора искать дрон туда. Молчим, пока
+             * фикса нет. */
+            if (!mv->gps_ms || mv->gps_fix_type < 2 || mv->gps_satellites == 0) return;
             /* см/с -> км/ч сотыми: v * 3.6 * 100 / 100 */
             n = crsf_build_gps_frame(mv->gps_lat_1e7, mv->gps_lon_1e7,
                                      (uint16_t)((uint32_t)mv->gps_vel_cms * 36 / 10),
