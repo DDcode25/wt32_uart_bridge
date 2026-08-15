@@ -26,14 +26,6 @@ typedef struct {
     uint32_t gen_net_frames;
     uint32_t gen_uart_frames;
 
-    /* Перевод телеметрии MAVLink -> CRSF */
-    uint32_t mav_rate_ms;        /* когда считали темп в прошлый раз */
-    uint32_t mav_rate_frames;    /* счётчик кадров на тот момент */
-    uint16_t mav_rate_hz;        /* измеренный темп потока с автопилота */
-    bool     mav_alive;          /* с гистерезисом, см. пороги в заголовке */
-    uint32_t mav_telem_ms;
-    uint32_t mav_telem_phase;
-    uint32_t mav_telem_frames;
 } routing_channel_t;
 
 static routing_channel_t s_rt[UART_MGR_NUM_CHANNELS];
@@ -202,138 +194,6 @@ static void generate_to_uart(routing_channel_t *rt, uint8_t channel_id)
     if (n && uart_manager_write(channel_id, frame, n) == ESP_OK) rt->gen_uart_frames++;
 }
 
-/* Перевод телеметрии автопилота в кадры CRSF.
- *
- * Смысл всей связки: на дальнем конце моста стоит полётник и говорит по
- * MAVLink, а пульту нужны кадры CRSF. Приёмника, который отдал бы готовую
- * телеметрию, в такой схеме нет — мост САМ играет его роль, иначе на пульте
- * навсегда остаётся «телеметрію втрачено».
- *
- * Кадры уходят в СЕТЬ каналом CRSF, а не в его провод: на этой плате в
- * проводе сидит борт, а пульт — на другом конце Ethernet.
- *
- * Темп намеренно низкий. Пульту хватает нескольких кадров в секунду, а на
- * той стороне они лягут в единственный провод, где каждая посылка отнимает
- * время у потока управления. */
-static void mavlink_telemetry_to_crsf(routing_channel_t *rt, uint8_t crsf_channel_id)
-{
-    const mavlink_state_t *mv = NULL;
-    routing_channel_t *src = NULL;
-
-    /* Ищем канал с живым автопилотом. Живость — это ТЕМП потока, а не
-     * возраст последнего кадра: борт, отдающий один heartbeat в две
-     * секунды, источником телеметрии уже не является. */
-    uint32_t now = (uint32_t)(esp_timer_get_time() / 1000);
-    for (uint8_t i = 0; i < UART_MGR_NUM_CHANNELS; i++) {
-        uart_mgr_channel_cfg_t ucfg;
-        if (uart_manager_get_config(i, &ucfg) != ESP_OK) continue;
-        if (ucfg.protocol != PROTO_MODE_MAVLINK || !ucfg.enabled) continue;
-
-        routing_channel_t *m = &s_rt[i];
-        const mavlink_state_t *st = &m->parsers.mavlink.state;
-
-        /* Темп считается по ЛЮБЫМ кадрам автопилота, а не по телеметрийным:
-         * борт может не отдавать GPS или батарею, но пока он говорит
-         * помногу — он жив. */
-        uint32_t frames = st->rx_frames_v1 + st->rx_frames_v2;
-        uint32_t dt = now - m->mav_rate_ms;
-        if (dt >= ROUTING_MAV_RATE_WINDOW_MS) {
-            if (m->mav_rate_ms) {
-                m->mav_rate_hz = (uint16_t)((frames - m->mav_rate_frames) * 1000 / dt);
-            }
-            m->mav_rate_ms = now;
-            m->mav_rate_frames = frames;
-        }
-
-        /* Гистерезис: живым становится по WAKE_HZ, мёртвым — по DEAD_HZ. */
-        if (m->mav_alive) {
-            if (m->mav_rate_hz < ROUTING_MAV_DEAD_HZ) m->mav_alive = false;
-        } else {
-            if (m->mav_rate_hz >= ROUTING_MAV_WAKE_HZ) m->mav_alive = true;
-        }
-
-        if (m->mav_alive) { mv = st; src = m; break; }
-    }
-    if (!mv || !src) return;
-
-    uint8_t frame[24];
-    size_t n = 0;
-
-    /* По одному кадру за такт, по кругу: так поток равномерный и не встаёт
-     * пачкой поперёк управления. */
-    /* Статистика связи идёт ЧЕРЕЗ РАЗ, остальное по кругу между ней.
-     * Именно по ней пульт судит, жива телеметрия или нет, и одинокого
-     * кадра дважды в секунду мало: одна потерянная посылка на общем
-     * проводе — и на пульте уже провал. */
-    uint32_t phase = rt->mav_telem_phase++;
-    switch ((phase & 1) ? 0 : (1 + (phase / 2) % 3)) {
-        case 0: {
-            /* Статистика связи — то, по чему пульт судит, жива ли связь с
-             * бортом, и по чему оператор принимает решения в полёте.
-             * Поэтому она обязана отражать РЕАЛЬНОЕ состояние борта, а не
-             * состояние Ethernet.
-             *
-             * Сначала здесь стояла постоянная сотня: линк-де либо есть, либо
-             * нет. На стенде это дало ровно то, чего нельзя допускать —
-             * пульт показывал исправную связь с уже выключенным дроном.
-             * Теперь качество падает вслед за возрастом последнего кадра с
-             * автопилота: свежий поток — сотня, дальше линейно до нуля к
-             * границе годности. Оператор видит, что борт замолкает, до
-             * того как телеметрия пропадёт совсем. */
-            /* Качество — из темпа потока. Полное с ROUTING_MAV_ALIVE_HZ,
-             * ниже — линейно вниз, и ниже нижнего порога сюда уже не
-             * попадаем: источник не считается живым и мост молчит. */
-            uint32_t hz = src->mav_rate_hz;
-            uint32_t lq = (hz >= ROUTING_MAV_ALIVE_HZ) ? 100
-                        : (hz <= ROUTING_MAV_DEAD_HZ)  ? 0
-                        : (hz - ROUTING_MAV_DEAD_HZ) * 100 /
-                          (ROUTING_MAV_ALIVE_HZ - ROUTING_MAV_DEAD_HZ);
-
-            crsf_link_stats_t ls = {
-                .uplink_rssi_1 = 40, .uplink_rssi_2 = 40,
-                .uplink_lq = (uint8_t)lq,
-                .uplink_snr = 20, .active_antenna = 0, .rf_mode = 2,
-                .uplink_tx_power = 3, .downlink_rssi = 40,
-                .downlink_lq = (uint8_t)lq, .downlink_snr = 20,
-            };
-            n = crsf_build_link_stats_frame(&ls, frame, sizeof(frame));
-            break;
-        }
-        case 1:
-            /* Ноль вольт — это не «разряжено», это «автопилот не знает».
-             * Пульт заводит по телеметрии датчики и показывает их
-             * оператору; выдумывать за борт нельзя. */
-            if (!mv->batt_ms || mv->batt_voltage_mv == 0) return;
-            n = crsf_build_battery_frame((int16_t)(mv->batt_voltage_mv / 100),
-                                         (int16_t)(mv->batt_current_ca / 10),
-                                         (uint32_t)(mv->batt_used_mah > 0 ? mv->batt_used_mah : 0),
-                                         (uint8_t)(mv->batt_remaining_pct > 0 ? mv->batt_remaining_pct : 0),
-                                         frame, sizeof(frame));
-            break;
-        case 2:
-            if (!mv->att_ms) return;
-            n = crsf_build_attitude_frame((int16_t)(mv->att_pitch_rad * 10000.0f),
-                                          (int16_t)(mv->att_roll_rad * 10000.0f),
-                                          (int16_t)(mv->att_yaw_rad * 10000.0f),
-                                          frame, sizeof(frame));
-            break;
-        case 3:
-            /* Без фикса координаты равны нулю, а ноль на широте и долготе —
-             * это точка в Атлантике у берегов Африки. Пульт покажет её как
-             * место борта и уведёт оператора искать дрон туда. Молчим, пока
-             * фикса нет. */
-            if (!mv->gps_ms || mv->gps_fix_type < 2 || mv->gps_satellites == 0) return;
-            /* см/с -> км/ч сотыми: v * 3.6 * 100 / 100 */
-            n = crsf_build_gps_frame(mv->gps_lat_1e7, mv->gps_lon_1e7,
-                                     (uint16_t)((uint32_t)mv->gps_vel_cms * 36 / 10),
-                                     mv->gps_cog_cdeg, mv->gps_alt_mm / 1000,
-                                     mv->gps_satellites, frame, sizeof(frame));
-            break;
-    }
-
-    if (n && transport_send(crsf_channel_id, frame, n) == ESP_OK) rt->mav_telem_frames++;
-}
-
 /* Закрывает паузы в телеметрии повтором последнего кадра link statistics.
  *
  * Отдельная задача, а не таймер: запись в UART блокирующая, а в
@@ -371,21 +231,6 @@ static void routing_service_task(void *arg)
                 /* Своя посылка тоже считается за поток в пульт, иначе
                  * удержание примется дублировать генератор. */
                 rt->last_telem_out_ms = now;
-            }
-
-            /* --- телеметрия автопилота в кадры CRSF ---
-             *
-             * НЕ зависит от uart_to_net: это не транзит с провода, а
-             * собранные нами кадры. Разница принципиальна как раз на этой
-             * плате. На одном проводе канал слышит собственную посылку, и
-             * то, что не успел списать счётчик эха, uart_to_net отправляет
-             * обратно в сеть — на стенде наш же поток управления вернулся
-             * на пульт (1762 Б/с вместо 130) и вешал его. Лечится
-             * выключением uart_to_net на дальней стороне, и телеметрия при
-             * этом обязана продолжать идти. */
-            if (now - rt->mav_telem_ms >= (1000 / ROUTING_MAV_TELEM_HZ)) {
-                rt->mav_telem_ms = now;
-                mavlink_telemetry_to_crsf(rt, i);
             }
 
             /* --- удержание телеметрии --- */
@@ -455,10 +300,4 @@ uint32_t routing_manager_get_telem_repeats(uint8_t channel_id)
 {
     if (channel_id >= UART_MGR_NUM_CHANNELS) return 0;
     return s_rt[channel_id].telem_repeats;
-}
-
-uint32_t routing_manager_get_mav_telem_frames(uint8_t channel_id)
-{
-    if (channel_id >= UART_MGR_NUM_CHANNELS) return 0;
-    return s_rt[channel_id].mav_telem_frames;
 }

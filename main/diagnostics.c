@@ -417,8 +417,6 @@ char *diagnostics_status_json(void)
                     cJSON *nj = crsf_state_to_json(&np->crsf.state);
                     cJSON_AddNumberToObject(nj, "hold_repeats",
                                             routing_manager_get_telem_repeats(i));
-                    cJSON_AddNumberToObject(nj, "mav_telem_frames",
-                                            routing_manager_get_mav_telem_frames(i));
                     cJSON_AddItemToObject(c, "crsf_from_net", nj);
                 }
             } else if (ucfg.protocol == PROTO_MODE_SBUS) {
