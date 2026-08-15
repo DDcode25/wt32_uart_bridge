@@ -27,6 +27,9 @@ typedef struct {
     uint32_t gen_uart_frames;
 
     /* Перевод телеметрии MAVLink -> CRSF */
+    uint32_t mav_rate_ms;        /* когда считали темп в прошлый раз */
+    uint32_t mav_rate_frames;    /* счётчик кадров на тот момент */
+    uint16_t mav_rate_hz;        /* измеренный темп потока с автопилота */
     uint32_t mav_telem_ms;
     uint32_t mav_telem_phase;
     uint32_t mav_telem_frames;
@@ -214,25 +217,36 @@ static void generate_to_uart(routing_channel_t *rt, uint8_t channel_id)
 static void mavlink_telemetry_to_crsf(routing_channel_t *rt, uint8_t crsf_channel_id)
 {
     const mavlink_state_t *mv = NULL;
+    routing_channel_t *src = NULL;
 
-    /* Ищем канал с живым автопилотом. Свежесть проверяем по метке кадра:
-     * молчащий борт не должен подсовывать пульту вчерашние цифры. */
+    /* Ищем канал с живым автопилотом. Живость — это ТЕМП потока, а не
+     * возраст последнего кадра: борт, отдающий один heartbeat в две
+     * секунды, источником телеметрии уже не является. */
     uint32_t now = (uint32_t)(esp_timer_get_time() / 1000);
     for (uint8_t i = 0; i < UART_MGR_NUM_CHANNELS; i++) {
         uart_mgr_channel_cfg_t ucfg;
         if (uart_manager_get_config(i, &ucfg) != ESP_OK) continue;
         if (ucfg.protocol != PROTO_MODE_MAVLINK || !ucfg.enabled) continue;
 
-        const mavlink_state_t *st = &s_rt[i].parsers.mavlink.state;
-        /* Свежесть меряется по ЛЮБОМУ кадру автопилота, а не по телеметрии:
-         * борт может не отдавать GPS или батарею, но пока он говорит —
-         * он жив. */
-        if (st->last_frame_ms && (now - st->last_frame_ms) < ROUTING_MAV_TELEM_FRESH_MS) {
-            mv = st;
-            break;
+        routing_channel_t *m = &s_rt[i];
+        const mavlink_state_t *st = &m->parsers.mavlink.state;
+
+        /* Темп считается по ЛЮБЫМ кадрам автопилота, а не по телеметрийным:
+         * борт может не отдавать GPS или батарею, но пока он говорит
+         * помногу — он жив. */
+        uint32_t frames = st->rx_frames_v1 + st->rx_frames_v2;
+        uint32_t dt = now - m->mav_rate_ms;
+        if (dt >= ROUTING_MAV_RATE_WINDOW_MS) {
+            if (m->mav_rate_ms) {
+                m->mav_rate_hz = (uint16_t)((frames - m->mav_rate_frames) * 1000 / dt);
+            }
+            m->mav_rate_ms = now;
+            m->mav_rate_frames = frames;
         }
+
+        if (m->mav_rate_hz >= ROUTING_MAV_DEAD_HZ) { mv = st; src = m; break; }
     }
-    if (!mv) return;
+    if (!mv || !src) return;
 
     uint8_t frame[24];
     size_t n = 0;
@@ -258,9 +272,14 @@ static void mavlink_telemetry_to_crsf(routing_channel_t *rt, uint8_t crsf_channe
              * автопилота: свежий поток — сотня, дальше линейно до нуля к
              * границе годности. Оператор видит, что борт замолкает, до
              * того как телеметрия пропадёт совсем. */
-            uint32_t age = now - mv->last_frame_ms;
-            uint32_t lq  = (age >= ROUTING_MAV_TELEM_FRESH_MS) ? 0
-                         : 100 - (age * 100 / ROUTING_MAV_TELEM_FRESH_MS);
+            /* Качество — из темпа потока. Полное с ROUTING_MAV_ALIVE_HZ,
+             * ниже — линейно вниз, и ниже нижнего порога сюда уже не
+             * попадаем: источник не считается живым и мост молчит. */
+            uint32_t hz = src->mav_rate_hz;
+            uint32_t lq = (hz >= ROUTING_MAV_ALIVE_HZ) ? 100
+                        : (hz <= ROUTING_MAV_DEAD_HZ)  ? 0
+                        : (hz - ROUTING_MAV_DEAD_HZ) * 100 /
+                          (ROUTING_MAV_ALIVE_HZ - ROUTING_MAV_DEAD_HZ);
 
             crsf_link_stats_t ls = {
                 .uplink_rssi_1 = 40, .uplink_rssi_2 = 40,
