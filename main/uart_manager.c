@@ -258,6 +258,17 @@ static void tx_task(void *arg)
     while (1) {
         if (xQueueReceive(ch->tx_queue, &blk, portMAX_DELAY) != pdTRUE) continue;
 
+        /* Дождаться межкадрового промежутка — но только если встречный
+         * конец вообще говорит. На дальней стороне моста провод молчит,
+         * синхронизировать не с чем, и ожидание лишь резало бы поток. */
+        if (ch->cfg.duplex == UART_DUPLEX_HALF_SINGLE_WIRE) {
+            uint32_t now = (uint32_t)(esp_timer_get_time() / 1000);
+            uint32_t last_rx = ch->stats.last_rx_time_ms;
+            if (last_rx && (now - last_rx) < UART_MGR_PEER_QUIET_MS) {
+                ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(UART_MGR_SINGLE_WIRE_GAP_LIMIT_MS));
+            }
+        }
+
         size_t n = blk.len;
         memcpy(batch, blk.data, blk.len);
 
@@ -279,8 +290,24 @@ static void rx_task(void *arg)
     uart_port_t port = channel_to_port(ch->cfg.channel_id);
     uint8_t buf[UART_MGR_RX_CHUNK_BYTES];
 
+    bool single_wire = (ch->cfg.duplex == UART_DUPLEX_HALF_SINGLE_WIRE);
+    /* На одном проводе ждём коротко: длинное ожидание проглатывает
+     * межкадровый промежуток, в который и надо отвечать. */
+    uint32_t wait_ms = single_wire ? UART_MGR_SINGLE_WIRE_GAP_WAIT_MS : UART_MGR_RX_WAIT_MS;
+
     while (1) {
-        int len = uart_read_bytes(port, buf, sizeof(buf), pdMS_TO_TICKS(UART_MGR_RX_WAIT_MS));
+        int len = uart_read_bytes(port, buf, sizeof(buf), pdMS_TO_TICKS(wait_ms));
+
+        /* Признак промежутка: забрали всё, что пришло, и в буфере пусто —
+         * значит хвост кадра уже прочитан и линия сейчас свободна. Просто
+         * короткого чтения мало: оно возвращается по нашему таймауту и может
+         * прийтись на середину чужой посылки. */
+        if (single_wire && ch->tx_task_handle) {
+            size_t pending = 0;
+            if (uart_get_buffered_data_len(port, &pending) == ESP_OK && pending == 0) {
+                xTaskNotifyGive(ch->tx_task_handle);
+            }
+        }
 
         /* Съесть эхо собственной посылки: на одном проводе оно приходит
          * первым и ровно той же длины. Дальше в том же чтении может лежать
