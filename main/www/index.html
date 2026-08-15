@@ -643,9 +643,12 @@ async function poll(){
       // что кадр такого типа не приходил ни разу — это не то же самое,
       // что нулевое значение.
       function crsfTele(n){
-        let r=`</table><h2 style="margin-top:10px">Телеметрія з мережі</h2><table>`+
+        // Заголовок нейтральний навмисно: на боці пульта з мережі йде
+        // телеметрія, а на дальньому боці — навпаки, кадри керування.
+        let r=`</table><h2 style="margin-top:10px">Потік із мережі</h2><table>`+
           row('Кадрів / CRC',n.rx_frames_total+' / '+
               (n.crc_errors>0?`<span class="err">${n.crc_errors}</span>`:'0'))+
+          row('З них кадрів каналів',n.rx_frames_channels)+
           row('Останній тип',n.rx_frames_total?hex(n.last_type)+
               (TYPE_NAMES[n.last_type]?' · '+TYPE_NAMES[n.last_type]:''):'—')+
           row('Типи кадрів',crsfTypes(n));
@@ -699,8 +702,17 @@ async function poll(){
         row('Останній msgid',c.mavlink.last_msgid);}
       if(c.raw){t+=row('RAW байтів усього',c.raw.bytes_total);}
       t+='</table>';
+      // Канали показуємо з обох напрямків. На дальньому кінці мосту дріт
+      // мовчить, а керування приходить із мережі — без цього блоку на такій
+      // платі не видно взагалі нічого, хоча кадри розбираються сотнями за
+      // секунду.
+      const chBlock=(label,arr)=>'<div style="margin-top:8px">'+(label?
+          `<div class="hint">${label}</div>`:'')+
+          arr.map((v,i)=>`<span class="ch">CH${i+1}: ${v}</span>`).join('')+'</div>';
       const chs=c.crsf?c.crsf.channels:(c.sbus?c.sbus.channels:null);
-      if(chs)t+='<div style="margin-top:8px">'+chs.map((v,i)=>`<span class="ch">CH${i+1}: ${v}</span>`).join('')+'</div>';
+      const net=c.crsf_from_net, netCh=net&&net.rx_frames_channels>0;
+      if(chs)t+=chBlock(netCh?'з дроту':'',chs);
+      if(netCh)t+=chBlock('із мережі',net.channels);
       return t+'</div>';
     }).join('');
   }catch(e){}
