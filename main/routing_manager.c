@@ -30,6 +30,7 @@ typedef struct {
     uint32_t mav_rate_ms;        /* когда считали темп в прошлый раз */
     uint32_t mav_rate_frames;    /* счётчик кадров на тот момент */
     uint16_t mav_rate_hz;        /* измеренный темп потока с автопилота */
+    bool     mav_alive;          /* с гистерезисом, см. пороги в заголовке */
     uint32_t mav_telem_ms;
     uint32_t mav_telem_phase;
     uint32_t mav_telem_frames;
@@ -244,7 +245,14 @@ static void mavlink_telemetry_to_crsf(routing_channel_t *rt, uint8_t crsf_channe
             m->mav_rate_frames = frames;
         }
 
-        if (m->mav_rate_hz >= ROUTING_MAV_DEAD_HZ) { mv = st; src = m; break; }
+        /* Гистерезис: живым становится по WAKE_HZ, мёртвым — по DEAD_HZ. */
+        if (m->mav_alive) {
+            if (m->mav_rate_hz < ROUTING_MAV_DEAD_HZ) m->mav_alive = false;
+        } else {
+            if (m->mav_rate_hz >= ROUTING_MAV_WAKE_HZ) m->mav_alive = true;
+        }
+
+        if (m->mav_alive) { mv = st; src = m; break; }
     }
     if (!mv || !src) return;
 
