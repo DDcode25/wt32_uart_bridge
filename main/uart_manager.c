@@ -39,6 +39,9 @@ typedef struct {
     TaskHandle_t rx_task_handle;
     TaskHandle_t tx_task_handle;
     QueueHandle_t tx_queue;
+    /* Однопроводный режим: сколько байт собственной посылки ещё предстоит
+     * услышать и выбросить. Ровно столько, сколько передали. */
+    volatile uint32_t echo_bytes;
     bool driver_installed;
     SemaphoreHandle_t lock;
 } uart_channel_t;
@@ -220,13 +223,22 @@ static void tx_write_now(uart_channel_t *ch, const uint8_t *data, size_t len)
         uart_wait_tx_done(port, pdMS_TO_TICKS(tx_drain_timeout_ms(&ch->cfg, len)));
         single_wire_tx_release(ch->cfg.tx_gpio);
 
-        /* На одном проводе приёмник слышит собственную посылку. Выкидываем
-         * её, иначе своё же эхо разбирается как входящий кадр и уходит
-         * обратно в сеть. Гонку с задачей приёма это не закрывает
-         * полностью — часть эха она может успеть забрать раньше, — но
-         * парсер такой мусор отбрасывает и ресинхронизируется. Заодно
-         * теряется то немногое, что пришло с линии за время посылки. */
-        uart_flush_input(port);
+        /* На одном проводе приёмник слышит собственную посылку, и её надо
+         * выбросить, иначе своё же эхо разберётся как входящий кадр и
+         * уйдёт обратно в сеть.
+         *
+         * Считаем ровно переданное, а выбрасывает задача приёма. Огульный
+         * uart_flush_input() отсюда не годится дважды: он забирает тот же
+         * драйверный мьютекс, что и uart_read_bytes() (тот держит его до
+         * 20 мс, и разворот линии упирался в чужой таймаут — четверть
+         * потока управления), а при сотне посылок в секунду он вдобавок
+         * сносил вместе с эхом всю встречную телеметрию. */
+        if (written > 0) ch->echo_bytes += (uint32_t)written;
+
+        /* Эхо могло и не дойти — приёмный буфер переполнился, линию
+         * придержал другой конец. Не даём долгу расти без предела, иначе
+         * счёт съест уже настоящую телеметрию. */
+        if (ch->echo_bytes > UART_MGR_TX_BATCH_BYTES) ch->echo_bytes = (uint32_t)written;
     }
 
     if (written > 0) {
@@ -269,6 +281,17 @@ static void rx_task(void *arg)
 
     while (1) {
         int len = uart_read_bytes(port, buf, sizeof(buf), pdMS_TO_TICKS(UART_MGR_RX_WAIT_MS));
+
+        /* Съесть эхо собственной посылки: на одном проводе оно приходит
+         * первым и ровно той же длины. Дальше в том же чтении может лежать
+         * уже настоящий встречный поток — его отдаём как обычно. */
+        if (len > 0 && ch->echo_bytes) {
+            uint32_t eat = (uint32_t)len < ch->echo_bytes ? (uint32_t)len : ch->echo_bytes;
+            ch->echo_bytes -= eat;
+            len -= (int)eat;
+            if (len > 0) memmove(buf, buf + eat, (size_t)len);
+        }
+
         if (len > 0) {
             xSemaphoreTake(ch->lock, portMAX_DELAY);
             ch->stats.rx_bytes += len;
