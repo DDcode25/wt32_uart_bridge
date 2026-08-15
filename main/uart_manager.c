@@ -42,6 +42,7 @@ typedef struct {
     /* Однопроводный режим: сколько байт собственной посылки ещё предстоит
      * услышать и выбросить. Ровно столько, сколько передали. */
     volatile uint32_t echo_bytes;
+    volatile uint32_t echo_deadline_ms;   /* после него долг сгорает */
     bool driver_installed;
     SemaphoreHandle_t lock;
 } uart_channel_t;
@@ -229,7 +230,11 @@ static void tx_write_now(uart_channel_t *ch, const uint8_t *data, size_t len)
          * 20 мс, и разворот линии упирался в чужой таймаут — четверть
          * потока управления), а при сотне посылок в секунду он вдобавок
          * сносил вместе с эхом всю встречную телеметрию. */
-        if (written > 0) ch->echo_bytes += (uint32_t)written;
+        if (written > 0) {
+            ch->echo_bytes += (uint32_t)written;
+            ch->echo_deadline_ms = (uint32_t)(esp_timer_get_time() / 1000)
+                                   + UART_MGR_ECHO_DEBT_MS;
+        }
 
         /* Эхо могло и не дойти — приёмный буфер переполнился, линию
          * придержал другой конец. Не даём долгу расти без предела, иначе
@@ -312,6 +317,19 @@ static void rx_task(void *arg)
         /* Съесть эхо собственной посылки: на одном проводе оно приходит
          * первым и ровно той же длины. Дальше в том же чтении может лежать
          * уже настоящий встречный поток — его отдаём как обычно. */
+        /* Долг по эху живёт считанные миллисекунды.
+         *
+         * Своя посылка возвращается сразу же — на 400000 бод это доли
+         * миллисекунды. Если за окно она не пришла, значит и не придёт:
+         * приёмник был занят, буфер сбросился, другой конец придержал
+         * линию. Бессрочный долг в этом случае съедает УЖЕ ЧУЖИЕ байты и
+         * рвёт чужие кадры — на стенде это стоило пяти-шести кадров пульта
+         * в секунду, вчетверо больше, чем сами столкновения. */
+        if (ch->echo_bytes &&
+            (uint32_t)(esp_timer_get_time() / 1000) > ch->echo_deadline_ms) {
+            ch->echo_bytes = 0;
+        }
+
         if (len > 0 && ch->echo_bytes) {
             uint32_t eat = (uint32_t)len < ch->echo_bytes ? (uint32_t)len : ch->echo_bytes;
             ch->echo_bytes -= eat;
@@ -427,7 +445,20 @@ esp_err_t uart_manager_apply_config(const uart_mgr_channel_cfg_t *cfg)
         .source_clk = UART_SCLK_DEFAULT,
     };
 
-    esp_err_t err = uart_driver_install(port, UART_MGR_RX_RING_BYTES, UART_MGR_TX_RING_BYTES, 0, NULL, 0);
+    /* Однопроводный режим ставится БЕЗ кольца передачи.
+     *
+     * С кольцом uart_write_bytes() лишь кладёт байты в очередь и сразу
+     * возвращается, а выдаёт их прерывание — когда придётся. Для общего
+     * провода это разрушает весь порядок «подключил вывод — отдал — отпустил»:
+     * мы отпускаем линию, считая посылку ушедшей, а она только собирается
+     * уходить. Отсюда и разброс, из-за которого восемь наших кадров в секунду
+     * портили тринадцать чужих, хотя занимают линию втрое меньше.
+     *
+     * Без кольца запись идёт прямо в FIFO и возвращается, когда всё отдано
+     * железу; дальше опрос дожидается последнего бита. Задача передачи
+     * блокируется на это время, но она для того и заведена. */
+    size_t tx_ring = (cfg->duplex == UART_DUPLEX_HALF_SINGLE_WIRE) ? 0 : UART_MGR_TX_RING_BYTES;
+    esp_err_t err = uart_driver_install(port, UART_MGR_RX_RING_BYTES, tx_ring, 0, NULL, 0);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "uart_driver_install(%d) failed: %s", port, esp_err_to_name(err));
         return err;
