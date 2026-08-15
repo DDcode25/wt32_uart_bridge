@@ -11,6 +11,7 @@ idf_component_register(
         "diagnostics.c"
         "web_server.c"
         "protocol_crsf.c"
+        "crsf_singlewire.c"
         "protocol_sbus.c"
         "protocol_mavlink.c"
         "protocol_raw.c"

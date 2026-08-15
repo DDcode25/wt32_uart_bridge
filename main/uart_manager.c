@@ -1,6 +1,7 @@
 #include <string.h>
 #include "uart_manager.h"
 #include "board_config.h"
+#include "crsf_singlewire.h"
 #include "diagnostics.h"   /* передача консоли каналу: diagnostics_capture_log() */
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -46,6 +47,9 @@ typedef struct {
     volatile uint32_t echo_len;
     volatile uint32_t echo_pos;
     volatile uint32_t echo_deadline_ms;
+    /* Канал отдан однопроводному сервису CRSF: провод, приём, передача и
+     * переключение направления там, здесь остаётся только учёт. */
+    bool crsf_singlewire;
     bool driver_installed;
     SemaphoreHandle_t lock;
 } uart_channel_t;
@@ -189,6 +193,22 @@ static void dump_bytes(uart_channel_t *ch, dump_state_t *st, const char *dir,
     } else {
         ESP_LOGW(TAG, "%s %s %uB: %s%s", ch->cfg.name, dir, (unsigned)len, hex, ellipsis);
     }
+}
+
+/* Кадр, принятый однопроводным сервисом. Дальше он идёт тем же путём, что
+ * и байты обычного канала: маршрутизация не знает, каким физическим слоем
+ * он получен. */
+static void crsf_sw_frame(const uint8_t *frame, size_t len, void *ctx)
+{
+    uart_channel_t *ch = (uart_channel_t *)ctx;
+
+    xSemaphoreTake(ch->lock, portMAX_DELAY);
+    ch->stats.rx_bytes += len;
+    ch->stats.last_rx_time_ms = (uint32_t)(esp_timer_get_time() / 1000);
+    xSemaphoreGive(ch->lock);
+
+    dump_bytes(ch, &ch->dump_rx, "RX", frame, len);
+    if (ch->rx_cb) ch->rx_cb(ch->cfg.channel_id, frame, len, ch->rx_cb_ctx);
 }
 
 /* Выбросить из принятого собственную посылку — но только ту её часть,
@@ -406,6 +426,12 @@ static void rx_task(void *arg)
 
 static esp_err_t stop_channel(uart_channel_t *ch)
 {
+    if (ch->crsf_singlewire) {
+        crsf_singlewire_stop();
+        ch->crsf_singlewire = false;
+        ch->driver_installed = false;
+        return ESP_OK;
+    }
     if (ch->rx_task_handle) {
         vTaskDelete(ch->rx_task_handle);
         ch->rx_task_handle = NULL;
@@ -475,6 +501,28 @@ esp_err_t uart_manager_apply_config(const uart_mgr_channel_cfg_t *cfg)
     if (cfg->rx_gpio == 1 || cfg->rx_gpio == 3 || cfg->tx_gpio == 1 || cfg->tx_gpio == 3) {
         ESP_LOGW(TAG, "%s uses the programming pins (TX0=GPIO1 / RX0=GPIO3)", cfg->name);
         ESP_LOGW(TAG, "disconnect the device there before flashing over USB-UART; OTA is unaffected");
+    }
+
+    /* CRSF по одному проводу ведёт отдельный сервис: там один владелец
+     * линии, событийный приём и своя state machine направления. Обычный
+     * путь с двумя задачами для этого режима не годится — приём и
+     * передача здесь не независимы. */
+    if (cfg->protocol == PROTO_MODE_CRSF && cfg->duplex == UART_DUPLEX_HALF_SINGLE_WIRE) {
+        crsf_sw_cfg_t sw = {
+            .port   = port,
+            .gpio   = cfg->tx_gpio,
+            .baud   = cfg->baud_rate,
+            .invert = (cfg->invert_rx || cfg->invert_tx),
+        };
+        esp_err_t swerr = crsf_singlewire_start(&sw, crsf_sw_frame, ch);
+        if (swerr != ESP_OK) {
+            ESP_LOGE(TAG, "channel %d: single-wire CRSF start failed: %s",
+                     cfg->channel_id, esp_err_to_name(swerr));
+            return swerr;
+        }
+        ch->crsf_singlewire = true;
+        ch->driver_installed = true;   /* порт занят сервисом */
+        return ESP_OK;
     }
 
     uart_config_t uart_cfg = {
@@ -587,6 +635,7 @@ void uart_manager_notify_line_free(uint8_t channel_id)
 {
     if (channel_id >= UART_MGR_NUM_CHANNELS) return;
     uart_channel_t *ch = &s_channels[channel_id];
+    if (ch->crsf_singlewire) return;   /* сервис сам знает конец кадра */
     if (ch->cfg.duplex != UART_DUPLEX_HALF_SINGLE_WIRE) return;
     if (ch->tx_task_handle) xTaskNotifyGive(ch->tx_task_handle);
 }
@@ -613,6 +662,23 @@ esp_err_t uart_manager_write(uint8_t channel_id, const uint8_t *data, size_t len
     if (channel_id >= UART_MGR_NUM_CHANNELS) return ESP_ERR_INVALID_ARG;
     uart_channel_t *ch = &s_channels[channel_id];
     if (!ch->driver_installed) return ESP_ERR_INVALID_STATE;
+    if (ch->crsf_singlewire) {
+        /* Кадр целиком уходит в очередь сервиса; писать в провод отсюда
+         * нельзя — владелец линии один. */
+        esp_err_t err = crsf_singlewire_send_frame(data, len);
+        if (err == ESP_OK) {
+            xSemaphoreTake(ch->lock, portMAX_DELAY);
+            ch->stats.tx_bytes += len;
+            xSemaphoreGive(ch->lock);
+            dump_bytes(ch, &ch->dump_tx, "TX", data, len);
+        } else {
+            xSemaphoreTake(ch->lock, portMAX_DELAY);
+            ch->stats.tx_dropped += (uint32_t)len;
+            xSemaphoreGive(ch->lock);
+        }
+        return err;
+    }
+
     if (!ch->tx_queue) return ESP_ERR_INVALID_STATE;
 
     /* Только очередь — никаких ожиданий провода в вызывающей задаче.

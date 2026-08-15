@@ -9,6 +9,7 @@
 #include "network_manager.h"
 #include "transport.h"
 #include "routing_manager.h"
+#include "crsf_singlewire.h"
 #include "esp_system.h"
 #include "esp_heap_caps.h"
 #include "esp_timer.h"
@@ -374,6 +375,33 @@ char *diagnostics_status_json(void)
         cJSON_AddBoolToObject(c, "net_ok",
                               want_udp == transport_udp_is_listening(i) &&
                               want_tcp == transport_tcp_is_listening(i));
+
+        /* Однопроводный CRSF: состояние линии и счётчики физического слоя.
+         * Их нет у обычного канала — там приём и передача независимы, и
+         * ни коллизий, ни переключений направления не бывает. */
+        if (ucfg.protocol == PROTO_MODE_CRSF &&
+            ucfg.duplex == UART_DUPLEX_HALF_SINGLE_WIRE && crsf_singlewire_running()) {
+            crsf_sw_stats_t sw;
+            crsf_singlewire_get_stats(&sw);
+            cJSON *j = cJSON_CreateObject();
+            cJSON_AddStringToObject(j, "state", crsf_singlewire_state_name(sw.state));
+            cJSON_AddNumberToObject(j, "rx_frames", sw.rx_frames);
+            cJSON_AddNumberToObject(j, "tx_frames", sw.tx_frames);
+            cJSON_AddNumberToObject(j, "rx_bytes", (double)sw.rx_bytes);
+            cJSON_AddNumberToObject(j, "tx_bytes", (double)sw.tx_bytes);
+            cJSON_AddNumberToObject(j, "crc_errors", sw.crc_errors);
+            cJSON_AddNumberToObject(j, "invalid_frames", sw.invalid_frames);
+            cJSON_AddNumberToObject(j, "rx_overflow", sw.rx_overflow);
+            cJSON_AddNumberToObject(j, "tx_queue_drops", sw.tx_queue_drops);
+            cJSON_AddNumberToObject(j, "collisions", sw.collisions);
+            cJSON_AddNumberToObject(j, "rx_to_tx_switches", sw.rx_to_tx_switches);
+            cJSON_AddNumberToObject(j, "tx_to_rx_switches", sw.tx_to_rx_switches);
+            cJSON_AddNumberToObject(j, "last_rx_ms", sw.last_rx_ms);
+            cJSON_AddNumberToObject(j, "last_tx_ms", sw.last_tx_ms);
+            cJSON_AddNumberToObject(j, "tx_queue_depth_max", sw.tx_queue_depth_max);
+            cJSON_AddNumberToObject(j, "rx_processing_max_us", sw.rx_processing_max_us);
+            cJSON_AddItemToObject(c, "crsf_singlewire", j);
+        }
 
         /* Протокольная статистика */
         const routing_parsers_t *p = routing_manager_get_parsers(i);
