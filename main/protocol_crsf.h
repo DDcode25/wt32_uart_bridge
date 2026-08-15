@@ -132,6 +132,7 @@ typedef struct {
 
     /* Статистика/диагностика */
     uint32_t rx_frames_total;
+    uint64_t rx_bytes;            /* всего байт, прошедших через разбор */
     uint32_t rx_frames_channels;
     uint32_t crc_errors;
     uint32_t sync_errors;         /* байты, отброшенные в поиске SYNC */
@@ -148,11 +149,12 @@ typedef struct {
 
 void crsf_parser_init(crsf_parser_t *p);
 
-/* Скормить входящие сырые байты парсеру. Байты ВСЕГДА дополнительно
- * передаются наружу через passthrough_cb (без изменений) — парсер
- * только наблюдает поток для статистики/декодирования каналов. */
+/* Скармливает байты потока. Колбэк вызывается на КАЖДЫЙ целый кадр,
+ * прошедший проверку адреса, длины и CRC, и получает кадр целиком
+ * (адрес..CRC) без изменений. Кадры с неизвестным TYPE проходят так же —
+ * мост не решает за пульт, что тому нужно. */
 void crsf_parser_feed(crsf_parser_t *p, uint8_t channel_id, const uint8_t *data, size_t len,
-                       protocol_passthrough_cb_t passthrough_cb, void *cb_ctx);
+                       protocol_passthrough_cb_t frame_cb, void *cb_ctx);
 
 uint8_t crsf_crc8_dvb_s2(const uint8_t *data, size_t len);
 
