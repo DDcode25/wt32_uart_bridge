@@ -31,6 +31,12 @@ static struct {
     crsf_parser_t   parser;
     crsf_sw_frame_cb_t cb;
     void           *cb_ctx;
+    int64_t         last_tx_us;
+    /* Хвост собственного эха, который не успел доехать к моменту чтения
+     * сразу после посылки. Досопоставляется в следующих чтениях. */
+    uint8_t         echo_tail[CRSF_MAX_FRAME_LEN];
+    uint8_t         echo_tail_len;
+    uint8_t         echo_tail_pos;
     volatile bool   running;
     volatile bool   should_exit;
 } s;
@@ -124,14 +130,28 @@ static void transmit_frame(const tx_frame_t *f)
      * то, что действительно наше; всё, что разошлось, идёт в разбор. */
     uint8_t echo[CRSF_MAX_FRAME_LEN];
     int got = uart_read_bytes(s.cfg.port, echo, f->len, 0);
+    int k = 0;
     if (got > 0) {
-        int k = 0;
         while (k < got && k < f->len && echo[k] == f->data[k]) k++;
         if (k < got) {
             /* Разошлось — дальше уже не наше, отдаём разбору как есть. */
-            if (k < f->len) s.stats.echo_mismatches++;
+            s.stats.echo_mismatches++;
             crsf_parser_feed(&s.parser, 0, &echo[k], (size_t)(got - k), on_frame, NULL);
+            k = f->len;   /* остаток эха потерян вместе с совпадением */
         }
+    }
+
+    /* Драйвер отдаёт хвост принятого только после своего таймаута простоя,
+     * поэтому к этому моменту эхо доезжает не целиком. Недобранное
+     * запоминаем и снимаем в следующих чтениях — иначе оно уходит в разбор
+     * как мусор: на стенде это давало полторы сотни ошибок длины в секунду
+     * и «приём» размером в половину собственной передачи. */
+    if (k < f->len) {
+        s.echo_tail_len = (uint8_t)(f->len - k);
+        s.echo_tail_pos = 0;
+        memcpy(s.echo_tail, &f->data[k], s.echo_tail_len);
+    } else {
+        s.echo_tail_len = s.echo_tail_pos = 0;
     }
 
     if (written > 0) {
@@ -154,6 +174,11 @@ static void transmit_frame(const tx_frame_t *f)
 static void service_tx(void)
 {
     while (uxQueueMessagesWaiting(s.tx_queue)) {
+        /* Ровный такт вместо залпа: между своими посылками выдерживаем
+         * паузу, чтобы встречной стороне было куда ответить. */
+        int64_t now_us = esp_timer_get_time();
+        if (s.last_tx_us && (now_us - s.last_tx_us) < CRSF_SW_TX_MIN_GAP_US) return;
+
         /* Линия должна быть тихой. Если в буфере уже что-то есть, значит
          * встречная сторона заговорила — это коллизия, и лучше промолчать:
          * наш кадр всё равно погиб бы, забрав с собой чужой. */
@@ -166,6 +191,7 @@ static void service_tx(void)
         tx_frame_t f;
         if (xQueueReceive(s.tx_queue, &f, 0) != pdTRUE) return;
         transmit_frame(&f);
+        s.last_tx_us = esp_timer_get_time();
     }
 }
 
@@ -205,15 +231,25 @@ static void crsf_sw_task(void *arg)
                     int n = uart_read_bytes(s.cfg.port, buf, take, 0);
                     if (n <= 0) break;
                     s.stats.rx_bytes += n;
+                    /* Сначала снять остаток собственного эха. */
+                    uint8_t *pb = buf; size_t pn = (size_t)n;
+                    while (pn && s.echo_tail_pos < s.echo_tail_len &&
+                           *pb == s.echo_tail[s.echo_tail_pos]) { pb++; pn--; s.echo_tail_pos++; }
+                    if (pn && s.echo_tail_pos < s.echo_tail_len) {
+                        s.stats.echo_mismatches++;
+                        s.echo_tail_len = s.echo_tail_pos = 0;   /* дальше не наше */
+                    }
+                    if (!pn) continue;
+
                     if (s.cfg.raw) {
                         /* Ни разбора, ни проверок: байты уходят как есть.
                          * Момент для ответа задаёт не кадр, а конец пачки —
                          * его драйвер отмечает аппаратным таймаутом приёма. */
                         s.stats.rx_frames++;
                         s.stats.last_rx_ms = now_ms();
-                        if (s.cb) s.cb(buf, (size_t)n, s.cb_ctx);
+                        if (s.cb) s.cb(pb, pn, s.cb_ctx);
                     } else {
-                        crsf_parser_feed(&s.parser, 0, buf, (size_t)n, on_frame, NULL);
+                        crsf_parser_feed(&s.parser, 0, pb, pn, on_frame, NULL);
                     }
                 }
 
