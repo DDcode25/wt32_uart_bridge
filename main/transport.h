@@ -73,6 +73,12 @@ esp_err_t transport_register_rx_cb(uint8_t channel_id, transport_net_rx_cb_t cb,
 /* Отправить данные из UART во все настроенные сетевые направления */
 esp_err_t transport_send(uint8_t channel_id, const uint8_t *data, size_t len);
 
+/* Отправить на произвольный адрес через уже открытый сокет канала.
+ * Используется зеркалом диагностики: копия потока уходит наблюдателю,
+ * не трогая настроенных адресатов канала. */
+esp_err_t transport_send_to(uint8_t channel_id, uint32_t ip, uint16_t port,
+                            const uint8_t *data, size_t len);
+
 esp_err_t transport_get_stats(uint8_t channel_id, transport_stats_t *out);
 esp_err_t transport_get_config(uint8_t channel_id, transport_cfg_t *out);
 

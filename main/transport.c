@@ -140,6 +140,13 @@ bool transport_tcp_is_listening(uint8_t channel_id)
     return s_ch[channel_id].tcp_listen_sock >= 0;
 }
 
+esp_err_t transport_send_to(uint8_t channel_id, uint32_t ip, uint16_t port,
+                            const uint8_t *data, size_t len)
+{
+    if (channel_id >= 3) return ESP_ERR_INVALID_ARG;
+    return udp_transport_send_to(&s_ch[channel_id], ip, port, data, len);
+}
+
 esp_err_t transport_get_stats(uint8_t channel_id, transport_stats_t *out)
 {
     if (channel_id >= 3) return ESP_ERR_INVALID_ARG;

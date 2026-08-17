@@ -94,6 +94,10 @@ const routing_parsers_t *routing_manager_get_net_parsers(uint8_t channel_id);
  * при живом радиолинке означает, что источник отдаёт кадры неровно. */
 uint32_t routing_manager_get_telem_repeats(uint8_t channel_id);
 
+/* Зеркалировать поток «сеть -> провод» на указанный адрес (0 = выключить).
+ * Живёт только до перезагрузки: это средство записи, а не настройка. */
+void routing_manager_set_mirror(uint8_t channel_id, uint32_t ip, uint16_t port);
+
 #ifdef __cplusplus
 }
 #endif

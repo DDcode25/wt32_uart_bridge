@@ -42,6 +42,8 @@ typedef struct {
 esp_err_t udp_transport_start(transport_channel_t *ch);
 void      udp_transport_close(transport_channel_t *ch);
 esp_err_t udp_transport_send(transport_channel_t *ch, const uint8_t *data, size_t len);
+esp_err_t udp_transport_send_to(transport_channel_t *ch, uint32_t ip, uint16_t port,
+                                const uint8_t *data, size_t len);
 
 esp_err_t tcp_transport_start_server(transport_channel_t *ch);
 void      tcp_transport_close(transport_channel_t *ch);

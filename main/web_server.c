@@ -7,6 +7,7 @@
 #include "uart_manager.h"
 #include "network_manager.h"
 #include "transport.h"
+#include <arpa/inet.h>
 #include "routing_manager.h"
 #include "esp_http_server.h"
 #include "esp_log.h"
@@ -178,6 +179,34 @@ static esp_err_t log_get(httpd_req_t *req)
 
 /* Включение/выключение дампа канала. Отдельно от /api/config, потому
  * что дамп не хранится в NVS и действует только до перезагрузки. */
+/* Зеркало потока из сети наблюдателю: {"channel":0..2,"ip":"a.b.c.d","port":N}
+ * Порт 0 или пустой ip выключают. Настройка не сохраняется — это средство
+ * записи трафика на время сеанса. */
+static esp_err_t mirror_post(httpd_req_t *req)
+{
+    REQUIRE_AUTH(req);
+    char *body = read_body(req);
+    if (!body) return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "invalid body");
+
+    cJSON *root = cJSON_Parse(body);
+    free(body);
+    if (!root) return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "invalid json");
+
+    cJSON *jch = cJSON_GetObjectItem(root, "channel");
+    cJSON *jip = cJSON_GetObjectItem(root, "ip");
+    cJSON *jpt = cJSON_GetObjectItem(root, "port");
+    if (!cJSON_IsNumber(jch) || jch->valueint < 0 || jch->valueint >= UART_MGR_NUM_CHANNELS) {
+        cJSON_Delete(root);
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "expected channel 0..2");
+    }
+
+    uint32_t ip = (cJSON_IsString(jip) && jip->valuestring[0]) ? inet_addr(jip->valuestring) : 0;
+    uint16_t port = cJSON_IsNumber(jpt) ? (uint16_t)jpt->valueint : 0;
+    routing_manager_set_mirror((uint8_t)jch->valueint, ip, port);
+    cJSON_Delete(root);
+    return send_json(req, "{\"ok\":true}");
+}
+
 static esp_err_t dump_post(httpd_req_t *req)
 {
     REQUIRE_AUTH(req);
@@ -489,6 +518,7 @@ esp_err_t web_server_start(app_config_t *cfg)
         { .uri = "/api/factory",  .method = HTTP_POST, .handler = factory_post },
         { .uri = "/api/ota",      .method = HTTP_POST, .handler = ota_post },
         { .uri = "/api/dump",     .method = HTTP_POST, .handler = dump_post },
+        { .uri = "/api/mirror",   .method = HTTP_POST, .handler = mirror_post },
     };
     for (size_t i = 0; i < sizeof(uris) / sizeof(uris[0]); i++) {
         httpd_register_uri_handler(s_server, &uris[i]);

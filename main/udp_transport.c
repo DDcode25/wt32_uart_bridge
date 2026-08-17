@@ -128,6 +128,19 @@ esp_err_t udp_transport_start(transport_channel_t *ch)
     return ESP_OK;
 }
 
+esp_err_t udp_transport_send_to(transport_channel_t *ch, uint32_t ip, uint16_t port,
+                                const uint8_t *data, size_t len)
+{
+    if (ch->udp_sock < 0 || !ip || !port) return ESP_ERR_INVALID_STATE;
+    struct sockaddr_in dst = {
+        .sin_family = AF_INET,
+        .sin_port   = htons(port),
+        .sin_addr.s_addr = ip,
+    };
+    int r = sendto(ch->udp_sock, data, len, 0, (struct sockaddr *)&dst, sizeof(dst));
+    return (r > 0) ? ESP_OK : ESP_FAIL;
+}
+
 esp_err_t udp_transport_send(transport_channel_t *ch, const uint8_t *data, size_t len)
 {
     if (ch->udp_sock < 0) return ESP_ERR_INVALID_STATE;

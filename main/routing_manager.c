@@ -30,6 +30,26 @@ typedef struct {
 
 static routing_channel_t s_rt[UART_MGR_NUM_CHANNELS];
 
+/* Зеркало потока «сеть -> провод» для записи эталонного трафика.
+ *
+ * Только в памяти и только на время сеанса: в конфиг не идёт и переживать
+ * перезагрузку не должно. Смысл — послушать чужое устройство, чьи кадры
+ * приходят по сети на этот канал, не мешая ни ему, ни каналу: копия
+ * уходит отдельным адресатом, настроенные адресаты не трогаются. */
+static struct {
+    uint32_t ip;
+    uint16_t port;
+} s_mirror[UART_MGR_NUM_CHANNELS];
+
+void routing_manager_set_mirror(uint8_t channel_id, uint32_t ip, uint16_t port)
+{
+    if (channel_id >= UART_MGR_NUM_CHANNELS) return;
+    s_mirror[channel_id].ip = ip;
+    s_mirror[channel_id].port = port;
+    ESP_LOGW(TAG, "ch%d: mirror %s -> %08lx:%u", channel_id,
+             (ip && port) ? "enabled" : "disabled", (unsigned long)ip, port);
+}
+
 void routing_manager_default_config(uint8_t channel_id, routing_cfg_t *out)
 {
     memset(out, 0, sizeof(*out));
@@ -111,6 +131,15 @@ static void on_net_rx(uint8_t channel_id, const uint8_t *data, size_t len, void 
     (void)ctx;
     if (channel_id >= UART_MGR_NUM_CHANNELS) return;
     routing_channel_t *rt = &s_rt[channel_id];
+
+    /* Копия наблюдателю — ДО всякой обработки и независимо от net_to_uart:
+     * записывать надо ровно то, что пришло по сети, а не то, что мы решили
+     * с этим делать. */
+    if (s_mirror[channel_id].ip && s_mirror[channel_id].port) {
+        transport_send_to(channel_id, s_mirror[channel_id].ip,
+                          s_mirror[channel_id].port, data, len);
+    }
+
     if (!rt->cfg.net_to_uart) return;
 
     uart_mgr_channel_cfg_t ucfg;
