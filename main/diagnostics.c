@@ -379,8 +379,10 @@ char *diagnostics_status_json(void)
         /* Однопроводный CRSF: состояние линии и счётчики физического слоя.
          * Их нет у обычного канала — там приём и передача независимы, и
          * ни коллизий, ни переключений направления не бывает. */
-        if (ucfg.protocol == PROTO_MODE_CRSF &&
-            ucfg.duplex == UART_DUPLEX_HALF_SINGLE_WIRE && crsf_singlewire_running()) {
+        /* Показываем всегда, когда сервис поднят: в прозрачном режиме эти
+         * счётчики нужны ровно так же, а раньше они там прятались, и
+         * состояние линии приходилось угадывать. */
+        if (crsf_singlewire_running() && ucfg.duplex == UART_DUPLEX_HALF_SINGLE_WIRE) {
             crsf_sw_stats_t sw;
             crsf_singlewire_get_stats(&sw);
             cJSON *j = cJSON_CreateObject();
