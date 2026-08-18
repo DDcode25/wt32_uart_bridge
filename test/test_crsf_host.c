@@ -166,9 +166,20 @@ static void test_invalid_length(void)
     CHECK(p.state.short_or_long_frame_errors == 1, "учтён как ошибка длины");
 
     crsf_parser_t p2; crsf_parser_init(&p2);
-    uint8_t tiny[] = { CRSF_ADDR_FLIGHT_CONTROLLER, 0x01, 0x16, 0x00 };
+    uint8_t tiny[] = { CRSF_ADDR_FLIGHT_CONTROLLER, 0x01, 0x16, 0x11 };
     crsf_parser_feed(&p2, 0, tiny, sizeof(tiny), cap_cb, NULL);
     CHECK(p2.state.short_or_long_frame_errors == 1, "длина 1 тоже отвергнута");
+
+    /* Ложное начало по broadcast — это НЕ испорченный кадр. Нулевые байты
+     * идут в потоке постоянно, и если считать их ошибками длины, счётчик
+     * испорченных кадров перестаёт что-либо значить: на живом однопроводном
+     * потоке он показывал единицу на каждый ИСПРАВНЫЙ кадр. */
+    crsf_parser_t p3; crsf_parser_init(&p3);
+    uint8_t zeros[] = { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
+    crsf_parser_feed(&p3, 0, zeros, sizeof(zeros), cap_cb, NULL);
+    CHECK(p3.state.short_or_long_frame_errors == 0,
+          "нули не засчитываются как ошибки длины");
+    CHECK(p3.state.sync_errors > 0, "а засчитываются как поиск начала кадра");
 }
 
 static void test_invalid_crc(void)
@@ -473,6 +484,32 @@ static void test_txq_purge(void)
     CHECK(q.stats.dropped_stale == 2, "оба учтены как устаревшие");
 }
 
+static void test_retarget(void)
+{
+    printf("== смена адреса назначения ==\n");
+    uint8_t pl[10] = {0x15,0x15,0x64,0xb8,0,0,0,0x27,0x64,0xca};
+    uint8_t fr[32];
+    size_t n = mkframe(CRSF_ADDR_FLIGHT_CONTROLLER, CRSF_FRAMETYPE_LINK_STATISTICS, pl, sizeof(pl), fr);
+    uint8_t crc_before = fr[n-1];
+
+    CHECK(crsf_frame_retarget(fr, n, CRSF_ADDR_RADIO_TRANSMITTER), "адрес сменён");
+    CHECK(fr[0] == CRSF_ADDR_RADIO_TRANSMITTER, "стоит адрес пульта");
+    CHECK(fr[n-1] == crc_before, "CRC не изменился — он адрес не покрывает");
+    CHECK(crsf_frame_check(fr, n) == n, "кадр по-прежнему проходит проверку");
+
+    CHECK(!crsf_frame_retarget(fr, n, CRSF_ADDR_RADIO_TRANSMITTER), "повторно не трогает");
+    CHECK(!crsf_frame_retarget(fr, n, 0), "ноль означает «не трогать»");
+
+    /* Битый кадр не правим: подменять адрес у того, что мы не смогли
+     * проверить, значит выдать мусор за адресованный кадр. */
+    uint8_t bad[32];
+    size_t bn = mkframe(CRSF_ADDR_FLIGHT_CONTROLLER, 0x14, pl, sizeof(pl), bad);
+    bad[bn-1] ^= 0xFF;
+    CHECK(!crsf_frame_retarget(bad, bn, CRSF_ADDR_RADIO_TRANSMITTER),
+          "кадр с битым CRC не переадресуется");
+    CHECK(bad[0] == CRSF_ADDR_FLIGHT_CONTROLLER, "и остаётся нетронутым");
+}
+
 int main(void)
 {
     test_crc();
@@ -488,6 +525,7 @@ int main(void)
     test_txq_purge();
     test_udp_route();
     test_echo();
+    test_retarget();
 
     printf("\n%s: %d проверок, %d провалов\n",
            fails ? "ТЕСТЫ НЕ ПРОШЛИ" : "ВСЕ ТЕСТЫ ПРОШЛИ", checks, fails);

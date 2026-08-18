@@ -648,6 +648,7 @@ char *config_manager_to_json(const app_config_t *cfg)
         cJSON_AddBoolToObject(c, "uart_to_net", cfg->routing[i].uart_to_net);
         cJSON_AddBoolToObject(c, "net_to_uart", cfg->routing[i].net_to_uart);
         cJSON_AddNumberToObject(c, "telemetry_hold_ms", cfg->routing[i].telemetry_hold_ms);
+        cJSON_AddNumberToObject(c, "crsf_dest_addr", cfg->routing[i].crsf_dest_addr);
         cJSON_AddBoolToObject(c, "crsf_test_to_uart", cfg->routing[i].crsf_test_to_uart);
         cJSON_AddBoolToObject(c, "crsf_test_to_net", cfg->routing[i].crsf_test_to_net);
 
@@ -788,6 +789,15 @@ esp_err_t config_manager_from_json(const char *json, app_config_t *out)
             out->routing[id].net_to_uart = json_bool(c, "net_to_uart", out->routing[id].net_to_uart);
             int hold = json_int(c, "telemetry_hold_ms", (int)out->routing[id].telemetry_hold_ms);
             if (hold >= 0 && hold <= 10000) out->routing[id].telemetry_hold_ms = (uint16_t)hold;
+
+            /* 0 — не трогать адрес. Прочие значения принимаются только из
+             * списка стандартных получателей: произвольный байт в этом поле
+             * означал бы кадры, адресованные несуществующему устройству. */
+            int da = json_int(c, "crsf_dest_addr", out->routing[id].crsf_dest_addr);
+            if (da == 0 || da == CRSF_ADDR_RADIO_TRANSMITTER || da == CRSF_ADDR_CRSF_TRANSMITTER ||
+                da == CRSF_ADDR_FLIGHT_CONTROLLER || da == CRSF_ADDR_RECEIVER) {
+                out->routing[id].crsf_dest_addr = (uint8_t)da;
+            }
             out->routing[id].crsf_test_to_uart = json_bool(c, "crsf_test_to_uart", out->routing[id].crsf_test_to_uart);
             out->routing[id].crsf_test_to_net  = json_bool(c, "crsf_test_to_net",  out->routing[id].crsf_test_to_net);
         }

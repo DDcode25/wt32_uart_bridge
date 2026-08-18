@@ -513,6 +513,10 @@ function render(){
      <label style="flex:0 0 auto" title="Вікно утримання від останнього справжнього кадру, мс. 0 вимикає">
        вікно <input type="number" id="c${c.channel_id}_holdms" min="0" max="10000" step="100"
                     value="${c.telemetry_hold_ms>0?c.telemetry_hold_ms:2000}" style="width:76px"> мс</label>
+     <label style="flex:0 0 auto" title="Міст з'єднує ДВА різні сегменти CRSF, і адресація в них різна: пульт звертається до модуля (0xEE), а телеметрія з дальнього сегмента несе 0xC8 — адресу польотного контролера. CRC адресу не покриває, тож підміна нічого не перераховує">
+       адреса призначення <select id="c${c.channel_id}_daddr">${
+         [[0,'не чіпати'],[234,'0xEA пульт'],[238,'0xEE модуль'],[200,'0xC8 політ. контролер'],[236,'0xEC приймач']]
+         .map(x=>`<option value="${x[0]}"${x[0]===(c.crsf_dest_addr||0)?' selected':''}>${x[1]}</option>`).join('')}</select></label>
      <label style="flex:0 0 auto" title="Генератор додає власний потік поряд зі справжнім — на бойовому лінку не вмикати">
        <input type="checkbox" id="c${c.channel_id}_tnet" ${c.crsf_test_to_net?'checked':''}> тест CRSF→мережа</label>
      <label style="flex:0 0 auto" title="Синтетична телеметрія в пульт: link stats + батарея">
@@ -568,6 +572,7 @@ function collect(){
     }
     if(g('c'+i+'_u2n')){c.uart_to_net=g('c'+i+'_u2n').checked;c.net_to_uart=g('c'+i+'_n2u').checked;}
     if(g('c'+i+'_tnet')){c.crsf_test_to_net=g('c'+i+'_tnet').checked;c.crsf_test_to_uart=g('c'+i+'_tuart').checked;}
+    if(g('c'+i+'_daddr'))c.crsf_dest_addr=+g('c'+i+'_daddr').value;
     // Нуль вимикає утримання, тому знята галочка і є вимкненням: саме
     // значення вікна при цьому зберігається в полі, щоб не набирати знову.
     if(g('c'+i+'_hold')){

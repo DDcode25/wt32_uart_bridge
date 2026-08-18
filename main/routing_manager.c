@@ -32,6 +32,9 @@ typedef struct {
      * режет кадры по датаграммам или теряет их по дороге. */
     uint32_t net_bad_bytes;
 
+    /* Скольким кадрам сменили адрес назначения по дороге в провод. */
+    uint32_t crsf_retargeted;
+
 } routing_channel_t;
 
 static routing_channel_t s_rt[UART_MGR_NUM_CHANNELS];
@@ -114,6 +117,20 @@ static void passthrough_to_uart(uint8_t channel_id, const uint8_t *data, size_t 
 static void net_frame_to_uart(const uint8_t *frame, size_t len, void *ctx)
 {
     routing_channel_t *rt = (routing_channel_t *)ctx;
+
+    /* Смена адреса назначения, если канал её просит. Копия нужна потому,
+     * что исходный буфер принадлежит транспорту и может содержать другие
+     * кадры этой же датаграммы. CRC не пересчитывается — он адрес не
+     * покрывает, см. crsf_frame_retarget(). */
+    uint8_t buf[CRSF_MAX_FRAME_LEN];
+    if (rt->cfg.crsf_dest_addr && len <= sizeof(buf)) {
+        memcpy(buf, frame, len);
+        if (crsf_frame_retarget(buf, len, rt->cfg.crsf_dest_addr)) {
+            rt->crsf_retargeted++;
+            frame = buf;
+        }
+    }
+
     crsf_parser_feed(&rt->net_parsers.crsf, rt->cfg.channel_id, frame, len,
                      passthrough_to_uart, NULL);
 }
@@ -352,4 +369,10 @@ uint32_t routing_manager_get_net_bad_bytes(uint8_t channel_id)
 {
     if (channel_id >= UART_MGR_NUM_CHANNELS) return 0;
     return s_rt[channel_id].net_bad_bytes;
+}
+
+uint32_t routing_manager_get_retargeted(uint8_t channel_id)
+{
+    if (channel_id >= UART_MGR_NUM_CHANNELS) return 0;
+    return s_rt[channel_id].crsf_retargeted;
 }

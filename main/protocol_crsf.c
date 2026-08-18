@@ -276,7 +276,25 @@ static void parser_scan(crsf_parser_t *p, uint8_t channel_id,
 
         uint8_t declared = p->buf[pos + 1];
         if (declared < 2 || declared > CRSF_MAX_FRAME_LEN - 2) {
-            p->state.short_or_long_frame_errors++;
+            /* Что это было — испорченный кадр или просто не кадр?
+             *
+             * Для broadcast это почти всегда второе. Нулевые байты идут в
+             * потоке постоянно, и раньше 0x00 по этой причине вообще не
+             * принимали за начало кадра; принимать его стало можно только
+             * после того, как ресинхронизация перестала стоить кадра.
+             *
+             * Записывать такое в ошибки длины нельзя. На однопроводной
+             * линии между кадрами идёт лишний байт — на живом потоке это
+             * дало 3777 «некорректных длин» на 3778 кадров, то есть
+             * счётчик, который обязан показывать испорченные кадры,
+             * показывал единицу на каждый исправный. Это потеря сигнала:
+             * настоящая ошибка длины в таком шуме уже не видна.
+             *
+             * Поэтому ложное начало по broadcast — это ошибка поиска
+             * начала кадра, а ошибка длины остаётся за адресами, которые
+             * в данных случайно не встречаются. */
+            if (p->buf[pos] == CRSF_ADDR_BROADCAST) p->state.sync_errors++;
+            else                                    p->state.short_or_long_frame_errors++;
             pos++;                                    /* ложное начало */
             continue;
         }
@@ -346,6 +364,15 @@ size_t crsf_frame_check(const uint8_t *frame, size_t len)
  * половина кадра на общей шине — это занятая линия и мусор на встречной
  * стороне. Возвращает число разобранных кадров; *bad_bytes получает
  * количество байт, которые пришлось выбросить. */
+bool crsf_frame_retarget(uint8_t *frame, size_t len, uint8_t addr)
+{
+    if (addr == 0) return false;                 /* выключено */
+    if (crsf_frame_check(frame, len) == 0) return false;
+    if (frame[0] == addr) return false;          /* уже нужный */
+    frame[0] = addr;                             /* CRC не затрагивается */
+    return true;
+}
+
 size_t crsf_split_frames(const uint8_t *data, size_t len, size_t *bad_bytes,
                          crsf_frame_iter_cb_t cb, void *ctx)
 {

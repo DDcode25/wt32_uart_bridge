@@ -474,6 +474,10 @@ char *diagnostics_status_json(void)
                      * сетью режет кадры по датаграммам или теряет их. */
                     cJSON_AddNumberToObject(nj, "bad_bytes",
                                             routing_manager_get_net_bad_bytes(i));
+                    /* Сколько кадров ушло в провод со сменённым адресом
+                     * назначения — иначе подмена была бы невидимой. */
+                    cJSON_AddNumberToObject(nj, "retargeted",
+                                            routing_manager_get_retargeted(i));
                     cJSON_AddItemToObject(c, "crsf_from_net", nj);
                 }
             } else if (ucfg.protocol == PROTO_MODE_SBUS) {

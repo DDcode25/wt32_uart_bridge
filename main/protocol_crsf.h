@@ -177,6 +177,23 @@ typedef void (*crsf_frame_iter_cb_t)(const uint8_t *frame, size_t len, void *ctx
 size_t crsf_split_frames(const uint8_t *data, size_t len, size_t *bad_bytes,
                          crsf_frame_iter_cb_t cb, void *ctx);
 
+/* Сменить адрес назначения у готового кадра.
+ *
+ * Нужно там, где мост соединяет ДВА РАЗНЫХ сегмента CRSF. Адрес — это
+ * «кому», и он у сегментов разный: пульт адресует кадры внешнему модулю
+ * (0xEE), а телеметрия, собранная на линии «приёмник — полётный
+ * контроллер», несёт 0xC8. Переслать её пульту байт в байт значит отдать
+ * ему кадр, адресованный не ему.
+ *
+ * Пересчитывать ничего не приходится: CRC в CRSF считается по TYPE и
+ * PAYLOAD и адрес НЕ покрывает. Поэтому подмена адреса — это не правка
+ * содержимого, а именно то, что делает настоящий модуль: завершает один
+ * сегмент и порождает кадр на другом.
+ *
+ * Возвращает false, если кадр не проходит проверку — тогда он не меняется.
+ * Значение addr == 0 означает «не трогать». */
+bool crsf_frame_retarget(uint8_t *frame, size_t len, uint8_t addr);
+
 /* Собрать RC_CHANNELS_PACKED кадр (для генерации/тестового режима) */
 size_t crsf_build_channels_frame(const uint16_t channels[CRSF_NUM_CHANNELS], uint8_t *out_buf, size_t out_buf_size);
 

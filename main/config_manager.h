@@ -19,7 +19,9 @@
 extern "C" {
 #endif
 
-/* Версия 4: в uart_mgr_channel_cfg_t добавлен crsf_mode (RX-only S.Port /
+/* Версия 5: в routing_cfg_t добавлен crsf_dest_addr — смена адреса
+ * назначения кадров, уходящих из сети в провод.
+ * Версия 4: в uart_mgr_channel_cfg_t добавлен crsf_mode (RX-only S.Port /
  * single-wire), в transport_stats_t — счётчик отправок без адресата.
  * Версия 3: в routing_cfg_t добавлены флаги тестового генератора CRSF.
  * Версия 2: в routing_cfg_t добавлено telemetry_hold_ms.
@@ -30,7 +32,7 @@ extern "C" {
  * сохранённые настройки молча заменяются заводскими. Один раз это уже
  * стоило потерянных настроек канала на живой плате — новое поле поехало
  * в прошивку без бампа, и после OTA пины вернулись к заводским. */
-#define CONFIG_SCHEMA_VERSION   4
+#define CONFIG_SCHEMA_VERSION   5
 #define CONFIG_WEB_USER_LEN     24
 #define CONFIG_PWHASH_LEN       32   /* SHA-256 */
 #define CONFIG_SALT_LEN         16
