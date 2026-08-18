@@ -94,6 +94,11 @@ const routing_parsers_t *routing_manager_get_net_parsers(uint8_t channel_id);
  * при живом радиолинке означает, что источник отдаёт кадры неровно. */
 uint32_t routing_manager_get_telem_repeats(uint8_t channel_id);
 
+/* Байты, пришедшие из сети и не сложившиеся в целый кадр CRSF. В провод
+ * они не отдаются. Растущий счётчик означает, что источник за сетью режет
+ * кадры по датаграммам либо теряет их. */
+uint32_t routing_manager_get_net_bad_bytes(uint8_t channel_id);
+
 #ifdef __cplusplus
 }
 #endif

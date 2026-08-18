@@ -13,12 +13,16 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include "esp_err.h"
+#include "udp_route.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-#define TRANSPORT_MAX_DESTINATIONS   4
+/* Число адресатов и их описание живут в udp_route.h вместе с правилом
+ * выбора: держать рядом с правилом то, к чему оно применяется, дешевле,
+ * чем следить за двумя одинаковыми структурами. */
+#define TRANSPORT_MAX_DESTINATIONS   UDP_ROUTE_MAX_DESTINATIONS
 #define TRANSPORT_MAX_TCP_CLIENTS    4
 #define TRANSPORT_RX_BUF_SIZE        1500   /* защита от переполнения: жёсткий предел */
 
@@ -30,11 +34,7 @@ typedef enum {
     NET_MODE_UDP_AND_TCP_SERVER,
 } transport_mode_t;
 
-typedef struct {
-    uint32_t ip;      /* сетевой порядок; 0xFFFFFFFF = broadcast */
-    uint16_t port;
-    bool     enabled;
-} transport_dest_t;
+typedef udp_dest_t transport_dest_t;
 
 typedef struct {
     uint8_t  channel_id;
@@ -55,6 +55,13 @@ typedef struct {
     uint32_t udp_rx_packets;
     uint32_t udp_tx_packets;
     uint32_t udp_rx_dropped;
+    /* Отправить было что, а некуда: ни включённого адресата, ни выученного
+     * пира. Отдельный счётчик, а не общая ошибка, потому что причина у
+     * него ровно одна и лечится она настройкой, а не поиском неполадок в
+     * сети. Для CRSF это ГЛАВНЫЙ признак незаконченной настройки:
+     * слушающий приёмник на ПК ничего не присылает, выучить его неоткуда,
+     * и без явного адресата поток управления просто некуда девать. */
+    uint32_t udp_tx_no_destination;
     uint32_t tcp_rx_bytes;
     uint32_t tcp_tx_bytes;
     uint8_t  tcp_clients_connected;
@@ -81,6 +88,11 @@ esp_err_t transport_get_config(uint8_t channel_id, transport_cfg_t *out);
  * появления этих признаков единственным следом была строка в логе,
  * недоступная пока UART0 отдан консоли. */
 bool transport_udp_is_listening(uint8_t channel_id);
+
+/* Выученный пир канала: источник последней входящей датаграммы. Хранится
+ * ОТДЕЛЬНО на каждый канал — пакет на MAVLink-порт не должен назначать
+ * адресата потоку CRSF. Возвращает false, если пира ещё нет. */
+bool transport_get_learned_peer(uint8_t channel_id, uint32_t *out_ip, uint16_t *out_port);
 bool transport_tcp_is_listening(uint8_t channel_id);
 void transport_default_config(uint8_t channel_id, transport_cfg_t *out);
 

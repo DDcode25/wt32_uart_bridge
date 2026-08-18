@@ -28,6 +28,7 @@ typedef struct {
     volatile bool udp_task_should_exit;
     struct sockaddr_in learned_peer;
     bool         has_learned_peer;
+    uint32_t     no_dest_warn_ms;   /* прореживание предупреждения «некуда слать» */
 
     /* TCP server */
     int          tcp_listen_sock;

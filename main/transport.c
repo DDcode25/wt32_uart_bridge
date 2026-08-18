@@ -25,15 +25,29 @@ void transport_default_config(uint8_t channel_id, transport_cfg_t *out)
         case 1: /* CRSF — минимальная задержка, только UDP */
             out->mode = NET_MODE_UDP;
             out->udp_listen_port = 14555;
-            out->udp_destinations[0].ip = inet_addr("192.168.1.255");
+            /* Адрес НЕ заполняется, и это осознанно.
+             *
+             * Раньше здесь стоял broadcast 192.168.1.255. Выключенным он
+             * ничего не делал, но стоило включить галочку — и поток
+             * управления уходил всей подсети, включая устройства, которым
+             * он не предназначен. Пустое поле честнее: оно видно в
+             * интерфейсе как незаконченная настройка, а для одностороннего
+             * CRSF адресат обязателен, потому что слушающий приёмник на ПК
+             * сам не пишет и выучить его неоткуда.
+             *
+             * Порт при этом заполнен: он у CRSF типовой, менять его почти
+             * никогда не нужно, и заставлять набирать его руками незачем. */
+            out->udp_destinations[0].ip = 0;
             out->udp_destinations[0].port = 14555;
-            out->udp_destinations[0].enabled = false; /* по умолчанию отвечаем выученному пиру */
+            out->udp_destinations[0].enabled = false;
             break;
         case 2: /* MAVLink — UDP 14550 + TCP server 1310 */
             out->mode = NET_MODE_UDP_AND_TCP_SERVER;
             out->udp_listen_port = 14550;
             out->tcp_server_port = 1310;
-            out->udp_destinations[0].ip = inet_addr("192.168.1.255");
+            /* Тот же довод, что и у CRSF, но здесь он мягче: Mission Planner
+             * пишет первым, поэтому выученного пира обычно достаточно. */
+            out->udp_destinations[0].ip = 0;
             out->udp_destinations[0].port = 14550;
             out->udp_destinations[0].enabled = false;
             break;
@@ -138,6 +152,16 @@ bool transport_tcp_is_listening(uint8_t channel_id)
 {
     if (channel_id >= 3) return false;
     return s_ch[channel_id].tcp_listen_sock >= 0;
+}
+
+bool transport_get_learned_peer(uint8_t channel_id, uint32_t *out_ip, uint16_t *out_port)
+{
+    if (channel_id >= 3) return false;
+    transport_channel_t *ch = &s_ch[channel_id];
+    if (!ch->has_learned_peer) return false;
+    if (out_ip)   *out_ip   = ch->learned_peer.sin_addr.s_addr;
+    if (out_port) *out_port = ntohs(ch->learned_peer.sin_port);
+    return true;
 }
 
 esp_err_t transport_get_stats(uint8_t channel_id, transport_stats_t *out)

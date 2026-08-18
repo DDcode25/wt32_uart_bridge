@@ -218,6 +218,32 @@ esp_err_t config_manager_validate(const app_config_t *cfg, char *reason, size_t 
                 u->name, u->tx_gpio);
         }
 
+        /* Согласованность режима CRSF с физикой канала.
+         *
+         * Два поля описывают одну и ту же линию, поэтому расходиться они не
+         * имеют права. Раньше расхождение проходило молча: в конфигурации
+         * стояли разные RX и TX, а работа шла по TX — пользователь получал
+         * не тот вывод, который выбрал, и искал обрыв в исправном проводе. */
+        if (u->protocol == PROTO_MODE_CRSF) {
+            if (u->crsf_mode == CRSF_MODE_SINGLE_WIRE) {
+                if (u->rx_gpio != u->tx_gpio) {
+                    return reject(reason, reason_len,
+                        "%s: single-wire CRSF — це ОДИН провід, RX і TX мають бути на одному "
+                        "GPIO (зараз RX=%d, TX=%d)", u->name, u->rx_gpio, u->tx_gpio);
+                }
+                if (u->duplex != UART_DUPLEX_HALF_SINGLE_WIRE) {
+                    return reject(reason, reason_len,
+                        "%s: single-wire CRSF вимагає дуплекс «Half / single-wire»", u->name);
+                }
+            } else {
+                if (u->duplex == UART_DUPLEX_HALF_SINGLE_WIRE) {
+                    return reject(reason, reason_len,
+                        "%s: режим «RX-only TX16S S.Port» не є однодротовим — оберіть "
+                        "single-wire CRSF або поверніть повний дуплекс", u->name);
+                }
+            }
+        }
+
         /* Пин, направление, можно ли брать вывод «только на вход».
          * Порядок важен: RX идёт первым и занимает вывод, поэтому
          * исключение для однопроводного режима проверяется на TX. */
@@ -316,6 +342,8 @@ void config_manager_apply_profile(app_config_t *cfg, config_profile_t profile)
         case PROFILE_A_SINELINK:
             /* UART1 CRSF, UART2 MAVLink, UART0 AUX RAW */
             cfg->uart[1].protocol = PROTO_MODE_CRSF;
+            cfg->uart[1].crsf_mode = CRSF_MODE_RX_ONLY_SPORT;
+            cfg->uart[1].duplex = UART_DUPLEX_FULL;
             cfg->uart[1].baud_rate = BOARD_UART1_DEFAULT_BAUD;
             cfg->uart[1].invert_rx = BOARD_UART1_DEFAULT_INVERT_RX ? true : false;
             cfg->transport[1].mode = NET_MODE_UDP;
@@ -348,11 +376,29 @@ void config_manager_apply_profile(app_config_t *cfg, config_profile_t profile)
             break;
 
         case PROFILE_C_TX16S:
-            /* Управление: CRSF на UART1 (или S.Bus — переключается вручную) */
+            /* Управление: CRSF на UART1 (или S.Bus — переключается вручную).
+             *
+             * Именно режим A: пульт отдаёт CRSF по S.Port, плата слушает и
+             * ничего не передаёт. Второй провод к пульту не идёт. */
             cfg->uart[1].protocol = PROTO_MODE_CRSF;
+            cfg->uart[1].crsf_mode = CRSF_MODE_RX_ONLY_SPORT;
+            cfg->uart[1].duplex = UART_DUPLEX_FULL;
+            cfg->uart[1].rx_gpio = BOARD_UART1_DEFAULT_RX_GPIO;
+            cfg->uart[1].tx_gpio = BOARD_UART1_DEFAULT_TX_GPIO;
             cfg->uart[1].baud_rate = BOARD_UART1_DEFAULT_BAUD;
             cfg->uart[1].invert_rx = BOARD_UART1_DEFAULT_INVERT_RX ? true : false;
+            cfg->uart[1].invert_tx = false;
             cfg->uart[1].rx_watchdog_timeout_ms = 500;
+            /* Односторонний поток: слушающему приёмнику на ПК неоткуда
+             * взяться в выученных пирах, поэтому адресата задаёт человек.
+             * Порт заполнен, адрес — нет: пустой адрес честно показывает,
+             * что настройка не закончена, а broadcast по умолчанию залил бы
+             * всю подсеть управляющим трафиком. */
+            cfg->transport[1].udp_destinations[0].port = 14555;
+            cfg->transport[1].udp_destinations[0].ip = 0;
+            cfg->transport[1].udp_destinations[0].enabled = false;
+            cfg->routing[1].uart_to_net = true;
+            cfg->routing[1].net_to_uart = false;
             cfg->transport[1].mode = NET_MODE_UDP;
             cfg->transport[1].udp_listen_port = 14555;
 
@@ -424,6 +470,8 @@ char *config_manager_to_json(const app_config_t *cfg)
         cJSON_AddNumberToObject(c, "rs485_de_gpio", u->rs485_de_gpio);
         cJSON_AddNumberToObject(c, "rs485_re_gpio", u->rs485_re_gpio);
         cJSON_AddNumberToObject(c, "protocol", u->protocol);
+        cJSON_AddNumberToObject(c, "crsf_mode", u->crsf_mode);
+        cJSON_AddStringToObject(c, "crsf_mode_name", uart_manager_crsf_mode_name(u->crsf_mode));
         cJSON_AddNumberToObject(c, "rx_watchdog_timeout_ms", u->rx_watchdog_timeout_ms);
         cJSON_AddBoolToObject(c, "enabled", u->enabled);
 
@@ -548,6 +596,15 @@ esp_err_t config_manager_from_json(const char *json, app_config_t *out)
 
             int proto = json_int(c, "protocol", u->protocol);
             if (proto >= 0 && proto < PROTO_MODE_MAX) u->protocol = proto;
+
+            int cm = json_int(c, "crsf_mode", u->crsf_mode);
+            if (cm == CRSF_MODE_RX_ONLY_SPORT || cm == CRSF_MODE_SINGLE_WIRE) u->crsf_mode = cm;
+            /* Провод один — инверсия одна. Приводим TX к RX здесь, а не
+             * только в uart_manager: иначе конфигурация и работа расходятся,
+             * и страница показывает настройку, которой линия не подчиняется. */
+            if (u->protocol == PROTO_MODE_CRSF && u->crsf_mode == CRSF_MODE_SINGLE_WIRE) {
+                u->invert_tx = u->invert_rx;
+            }
             u->rx_watchdog_timeout_ms = (uint32_t)json_int(c, "rx_watchdog_timeout_ms", (int)u->rx_watchdog_timeout_ms);
             u->enabled = json_bool(c, "enabled", u->enabled);
 

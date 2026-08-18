@@ -67,6 +67,30 @@ static uart_port_t channel_to_port(uint8_t channel_id)
     }
 }
 
+const char *uart_manager_crsf_mode_name(uart_mgr_crsf_mode_t m)
+{
+    switch (m) {
+        case CRSF_MODE_SINGLE_WIRE:   return "Single-wire CRSF";
+        case CRSF_MODE_RX_ONLY_SPORT: return "RX-only TX16S S.Port";
+        default:                      return "?";
+    }
+}
+
+/* Работает ли канал общим проводом. Решает РЕЖИМ, а не только дуплекс:
+ * для CRSF режим — источник истины, а duplex приводится к нему проверкой
+ * конфигурации, чтобы двух правд не было. */
+static bool cfg_is_crsf_single_wire(const uart_mgr_channel_cfg_t *cfg)
+{
+    return cfg->protocol == PROTO_MODE_CRSF && cfg->crsf_mode == CRSF_MODE_SINGLE_WIRE;
+}
+
+/* Канал, которому передавать запрещено физически: TX никуда не подключён,
+ * а на том конце пульт. */
+static bool cfg_is_crsf_rx_only(const uart_mgr_channel_cfg_t *cfg)
+{
+    return cfg->protocol == PROTO_MODE_CRSF && cfg->crsf_mode == CRSF_MODE_RX_ONLY_SPORT;
+}
+
 /* Однопроводный half-duplex: вывод отдаётся передатчику только на время
  * посылки, в покое TX физически отвязан от вывода.
  *
@@ -118,6 +142,12 @@ void uart_manager_default_config(uint8_t channel_id, uart_mgr_channel_cfg_t *out
             out_cfg->baud_rate = BOARD_UART1_DEFAULT_BAUD;
             out_cfg->invert_rx = BOARD_UART1_DEFAULT_INVERT_RX ? true : false;
             out_cfg->protocol = PROTO_MODE_CRSF;
+            /* Заводской режим — приём с S.Port пульта, а не общий провод.
+             * Так безопаснее по умолчанию: он ничего не передаёт, поэтому
+             * не может ни столкнуться с чужим кадром, ни подвесить пульт.
+             * Общий провод включается осознанно и требует одинаковых
+             * RX и TX GPIO. */
+            out_cfg->crsf_mode = CRSF_MODE_RX_ONLY_SPORT;
             out_cfg->rx_watchdog_timeout_ms = 500; /* низкая задержка failsafe */
             break;
         case 2: /* UART2 - MAVLink */
@@ -507,13 +537,26 @@ esp_err_t uart_manager_apply_config(const uart_mgr_channel_cfg_t *cfg)
      * линии, событийный приём и своя state machine направления. Обычный
      * путь с двумя задачами для этого режима не годится — приём и
      * передача здесь не независимы. */
-    if ((cfg->protocol == PROTO_MODE_CRSF || cfg->protocol == PROTO_MODE_RAW) &&
-        cfg->duplex == UART_DUPLEX_HALF_SINGLE_WIRE) {
+    if (cfg_is_crsf_single_wire(cfg) ||
+        (cfg->protocol == PROTO_MODE_RAW && cfg->duplex == UART_DUPLEX_HALF_SINGLE_WIRE)) {
+        /* Вывод берём из rx_gpio, а не из tx_gpio.
+         *
+         * Раньше здесь молча стоял tx_gpio, и настройка rx_gpio для этого
+         * режима не значила ничего: указав разные пины, пользователь
+         * получал работу на том, который не выбирал. Теперь равенство
+         * RX и TX требует проверка конфигурации (config_manager_validate),
+         * так что читать можно любой из них — и читаем тот, что описывает
+         * приём, потому что приём здесь основной. */
         crsf_sw_cfg_t sw = {
             .port   = port,
-            .gpio   = cfg->tx_gpio,
+            .gpio   = cfg->rx_gpio,
             .baud   = cfg->baud_rate,
-            .invert = (cfg->invert_rx || cfg->invert_tx),
+            /* Провод один — инверсия у него одна. Отдельные флаги RX и TX
+             * тут смысла не имеют, поэтому берём invert_rx как ЕДИНСТВЕННУЮ
+             * настройку инверсии линии и применяем к обоим направлениям.
+             * Для прямого CRSF TTL она выключена; включать её нужно только
+             * при внешнем инверторе. */
+            .invert = cfg->invert_rx,
             /* RAW на одном проводе — тот же физический слой, но мост
              * становится прозрачным: ничего не разбирает и ничего не
              * добавляет от себя. */
@@ -527,7 +570,22 @@ esp_err_t uart_manager_apply_config(const uart_mgr_channel_cfg_t *cfg)
         }
         ch->crsf_singlewire = true;
         ch->driver_installed = true;   /* порт занят сервисом */
+        ESP_LOGI(TAG, "channel %d (%s): %s on GPIO%d, %lu baud%s",
+                 cfg->channel_id, cfg->name,
+                 uart_manager_crsf_mode_name(CRSF_MODE_SINGLE_WIRE),
+                 cfg->rx_gpio, (unsigned long)cfg->baud_rate,
+                 cfg->invert_rx ? ", line inverted" : "");
         return ESP_OK;
+    }
+
+    if (cfg_is_crsf_rx_only(cfg)) {
+        ESP_LOGI(TAG, "channel %d (%s): %s, RX GPIO%d, %lu baud, inversion rx=%d tx=%d",
+                 cfg->channel_id, cfg->name,
+                 uart_manager_crsf_mode_name(CRSF_MODE_RX_ONLY_SPORT),
+                 cfg->rx_gpio, (unsigned long)cfg->baud_rate,
+                 cfg->invert_rx, cfg->invert_tx);
+        ESP_LOGI(TAG, "  TX GPIO%d is NOT connected in this mode; bridge is UART -> network only",
+                 cfg->tx_gpio);
     }
 
     uart_config_t uart_cfg = {
@@ -667,6 +725,20 @@ esp_err_t uart_manager_write(uint8_t channel_id, const uint8_t *data, size_t len
     if (channel_id >= UART_MGR_NUM_CHANNELS) return ESP_ERR_INVALID_ARG;
     uart_channel_t *ch = &s_channels[channel_id];
     if (!ch->driver_installed) return ESP_ERR_INVALID_STATE;
+
+    /* В пульт не пишем. Это не осторожность, а следствие: запись в линию
+     * S.Port работающего TX16S вешала его повторяемо, и восстанавливался он
+     * только перезагрузкой. Маршрутизация направление сеть->UART для такого
+     * канала и так выключает, но запрет обязан стоять здесь — у провода
+     * один сторож, и он не должен зависеть от того, кто и как настроил
+     * маршруты. */
+    if (cfg_is_crsf_rx_only(&ch->cfg)) {
+        xSemaphoreTake(ch->lock, portMAX_DELAY);
+        ch->stats.tx_blocked++;
+        xSemaphoreGive(ch->lock);
+        return ESP_ERR_NOT_SUPPORTED;
+    }
+
     if (ch->crsf_singlewire) {
         /* Кадр целиком уходит в очередь сервиса; писать в провод отсюда
          * нельзя — владелец линии один. */

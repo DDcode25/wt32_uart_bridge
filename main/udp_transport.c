@@ -128,28 +128,54 @@ esp_err_t udp_transport_start(transport_channel_t *ch)
     return ESP_OK;
 }
 
+/* Как часто напоминать в логе, что отправлять некуда.
+ *
+ * Без ограничения такое напоминание печаталось бы на каждый кадр — при
+ * CRSF это 250 строк в секунду, которые вытеснят из кольцевого буфера всё
+ * остальное, включая причину, по которой туда полезли. Раз в пять секунд
+ * достаточно, чтобы заметить, и не мешает читать остальное. */
+#define UDP_NO_DEST_WARN_INTERVAL_MS  5000
+
 esp_err_t udp_transport_send(transport_channel_t *ch, const uint8_t *data, size_t len)
 {
     if (ch->udp_sock < 0) return ESP_ERR_INVALID_STATE;
 
-    int sent_count = 0;
+    /* Куда отправлять — решает udp_route_plan(): явные адресаты, иначе
+     * выученный пир, иначе никуда. Правило вынесено отдельно и покрыто
+     * хостовыми тестами, потому что именно оно определяет, работает ли
+     * односторонний поток CRSF на слушающий приёмник. */
+    udp_route_plan_t plan = udp_route_plan(ch->cfg.udp_destinations,
+                                           TRANSPORT_MAX_DESTINATIONS,
+                                           ch->has_learned_peer);
 
-    /* Fan-out: отправляем во все включённые destinations */
-    for (int i = 0; i < TRANSPORT_MAX_DESTINATIONS; i++) {
-        transport_dest_t *d = &ch->cfg.udp_destinations[i];
-        if (!d->enabled || d->port == 0) continue;
-
-        struct sockaddr_in dst = {
-            .sin_family = AF_INET,
-            .sin_port   = htons(d->port),
-            .sin_addr.s_addr = d->ip,
-        };
-        int r = sendto(ch->udp_sock, data, len, 0, (struct sockaddr *)&dst, sizeof(dst));
-        if (r > 0) sent_count++;
+    if (plan.kind == UDP_ROUTE_NONE) {
+        ch->stats.udp_tx_no_destination++;
+        uint32_t now = (uint32_t)(esp_timer_get_time() / 1000);
+        if (now - ch->no_dest_warn_ms >= UDP_NO_DEST_WARN_INTERVAL_MS) {
+            ch->no_dest_warn_ms = now;
+            ESP_LOGW(TAG, "ch%d: nowhere to send - no enabled UDP destination and no learned peer "
+                          "(%lu frames dropped so far)", ch->cfg.channel_id,
+                     (unsigned long)ch->stats.udp_tx_no_destination);
+            ESP_LOGW(TAG, "ch%d: a listen-only receiver never sends first - set an explicit "
+                          "destination IP:port", ch->cfg.channel_id);
+        }
+        return ESP_ERR_NOT_FOUND;
     }
 
-    /* Если явных destinations нет — отвечаем выученному пиру */
-    if (sent_count == 0 && ch->has_learned_peer) {
+    int sent_count = 0;
+
+    if (plan.kind == UDP_ROUTE_EXPLICIT) {
+        for (uint8_t k = 0; k < plan.explicit_count; k++) {
+            const transport_dest_t *d = &ch->cfg.udp_destinations[plan.idx[k]];
+            struct sockaddr_in dst = {
+                .sin_family = AF_INET,
+                .sin_port   = htons(d->port),
+                .sin_addr.s_addr = d->ip,
+            };
+            int r = sendto(ch->udp_sock, data, len, 0, (struct sockaddr *)&dst, sizeof(dst));
+            if (r > 0) sent_count++;
+        }
+    } else {
         int r = sendto(ch->udp_sock, data, len, 0,
                         (struct sockaddr *)&ch->learned_peer, sizeof(ch->learned_peer));
         if (r > 0) sent_count++;

@@ -26,6 +26,12 @@ typedef struct {
     uint32_t gen_net_frames;
     uint32_t gen_uart_frames;
 
+    /* Байты из сети, не сложившиеся в целый кадр CRSF. В провод они не
+     * уходят: половина кадра на общей шине — это занятая линия и мусор на
+     * встречной стороне. Растущий счётчик означает, что источник за сетью
+     * режет кадры по датаграммам или теряет их по дороге. */
+    uint32_t net_bad_bytes;
+
 } routing_channel_t;
 
 static routing_channel_t s_rt[UART_MGR_NUM_CHANNELS];
@@ -99,6 +105,19 @@ static void passthrough_to_uart(uint8_t channel_id, const uint8_t *data, size_t 
     s_rt[channel_id].last_telem_out_ms = (uint32_t)(esp_timer_get_time() / 1000);
 }
 
+/* Один целый кадр из сети -> в провод.
+ *
+ * Кадр всё равно прогоняется через парсер: он уже проверен по CRC, но
+ * разбор нужен ради диагностики — телеметрия с той стороны видна в
+ * интерфейсе именно отсюда. Парсеру достаётся ровно один кадр, поэтому
+ * состояние между датаграммами он не тянет. */
+static void net_frame_to_uart(const uint8_t *frame, size_t len, void *ctx)
+{
+    routing_channel_t *rt = (routing_channel_t *)ctx;
+    crsf_parser_feed(&rt->net_parsers.crsf, rt->cfg.channel_id, frame, len,
+                     passthrough_to_uart, NULL);
+}
+
 /* сеть -> протокол -> UART.
  *
  * Прозрачность сохраняется: парсер отдаёт байты в passthrough немедленно
@@ -122,7 +141,24 @@ static void on_net_rx(uint8_t channel_id, const uint8_t *data, size_t len, void 
     switch (ucfg.protocol) {
         case PROTO_MODE_CRSF: {
             uint32_t before = rt->net_parsers.crsf.state.link_stats_frame_ms;
-            crsf_parser_feed(&rt->net_parsers.crsf, channel_id, data, len, passthrough_to_uart, NULL);
+
+            /* Датаграмма разбирается ЦЕЛИКОМ и сама по себе, а не как
+             * продолжение предыдущей.
+             *
+             * Раньше сюда шёл потоковый парсер, тот же, что и для провода.
+             * Для байтового потока это верно, для UDP — нет: датаграммы
+             * самостоятельны и могут теряться и меняться местами. Обрубок
+             * из одной датаграммы склеивался с началом следующей, проходил
+             * по длине и CRC случайным образом, и в общий провод уходил
+             * кадр, которого никто не отправлял.
+             *
+             * crsf_split_frames() режет пакет на целые кадры и отдаёт
+             * каждый; хвост, не собравшийся в кадр, в линию не идёт вовсе
+             * и учитывается как брак. */
+            size_t bad = 0;
+            crsf_split_frames(data, len, &bad, net_frame_to_uart, rt);
+            rt->net_bad_bytes += (uint32_t)bad;
+
             /* Окно удержания отсчитывается от СВЕЖИХ данных, поэтому
              * засчитываем только реально разобранный кадр статистики, а
              * не любой пришедший из сети байт. */
@@ -300,4 +336,10 @@ uint32_t routing_manager_get_telem_repeats(uint8_t channel_id)
 {
     if (channel_id >= UART_MGR_NUM_CHANNELS) return 0;
     return s_rt[channel_id].telem_repeats;
+}
+
+uint32_t routing_manager_get_net_bad_bytes(uint8_t channel_id)
+{
+    if (channel_id >= UART_MGR_NUM_CHANNELS) return 0;
+    return s_rt[channel_id].net_bad_bytes;
 }
