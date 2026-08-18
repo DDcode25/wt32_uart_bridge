@@ -286,13 +286,17 @@ static void parser_scan(crsf_parser_t *p, uint8_t channel_id,
 
         /* Адрес ставим ДО разбора: сохранение кадра link statistics внутри
          * process_frame() возвращает его на место, а в переданный туда
-         * фрагмент адрес не входит. */
+         * фрагмент адрес не входит. Если разбор не удался, адрес
+         * восстанавливаем: диагностика не должна показывать адресом
+         * последнего кадра байт из мусора, который кадром не оказался. */
+        uint8_t prev_addr = p->state.last_addr;
         p->state.last_addr = p->buf[pos];
 
         if (process_frame(p, &p->buf[pos + 1], declared)) {
             if (frame_cb) frame_cb(channel_id, &p->buf[pos], total, cb_ctx);
             pos += total;
         } else {
+            p->state.last_addr = prev_addr;
             pos++;   /* CRC не сошёлся — это было не начало кадра */
         }
     }

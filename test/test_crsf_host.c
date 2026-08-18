@@ -210,6 +210,8 @@ static void test_resync(void)
     crsf_parser_feed(&p, 0, stream, sl, cap_cb, NULL);
     CHECK(cap_n == 1 && cap[0].len == gn, "настоящий кадр найден внутри мусора");
     CHECK(memcmp(cap[0].data, good, gn) == 0, "и отдан без искажений");
+    CHECK(p.state.last_addr == CRSF_ADDR_FLIGHT_CONTROLLER,
+          "адрес последнего кадра взят из настоящего кадра, а не из мусора");
 
     /* Чистый мусор без валидных адресов — только sync_errors, без падений */
     crsf_parser_t p2; crsf_parser_init(&p2);

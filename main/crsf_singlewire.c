@@ -495,24 +495,15 @@ esp_err_t crsf_singlewire_send_frame(const uint8_t *frame, size_t len)
 
     /* Здесь только постановка в очередь. Писать в провод из чужой задачи
      * нельзя: владелец линии один, и момент посылки выбирает он. */
+    /* Прозрачный режим: содержимое не наше дело, проверять его нельзя —
+     * ровно это и означает прозрачность. Срок годности и вытеснение
+     * старого работают и здесь: они относятся к линии, а не к кадру. */
     if (s.cfg.raw) {
-        /* Прозрачный режим: проверок нет, но очередь их делает, поэтому в
-         * ней такому кадру места нет. Отдаём как есть, минуя проверку —
-         * ровно это и означает прозрачность. */
         xSemaphoreTake(s.txq_lock, portMAX_DELAY);
-        crsf_txq_t *q = &s.txq;
-        if (q->count == CRSF_TXQ_CAPACITY) {
-            q->head = (uint8_t)((q->head + 1) % CRSF_TXQ_CAPACITY);
-            q->count--;
-            q->stats.dropped_overflow++;
-        }
-        uint8_t tail = (uint8_t)((q->head + q->count) % CRSF_TXQ_CAPACITY);
-        memcpy(q->slot[tail].data, frame, len);
-        q->slot[tail].len = (uint8_t)len;
-        q->slot[tail].queued_ms = now_ms();
-        q->count++;
-        q->stats.queued++;
-        if (q->count > q->stats.depth_max) q->stats.depth_max = q->count;
+        crsf_txq_push_raw(&s.txq, frame, len, now_ms());
+        s.stats.tx_drop_overflow = s.txq.stats.dropped_overflow;
+        s.stats.tx_queue_depth   = (uint16_t)crsf_txq_depth(&s.txq);
+        s.stats.tx_queue_depth_max = s.txq.stats.depth_max;
         xSemaphoreGive(s.txq_lock);
         return ESP_OK;
     }

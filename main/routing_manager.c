@@ -259,6 +259,11 @@ static void routing_service_task(void *arg)
             uart_mgr_channel_cfg_t ucfg;
             if (uart_manager_get_config(i, &ucfg) != ESP_OK) continue;
             if (ucfg.protocol != PROTO_MODE_CRSF || !ucfg.enabled) continue;
+            /* В канал, который только слушает, не пишет никто — включая
+             * удержание телеметрии и тестовый генератор. Иначе счётчик
+             * заблокированных передач растёт от собственных фоновых задач
+             * и перестаёт означать «кто-то настроил маршрут неверно». */
+            if (ucfg.crsf_mode == CRSF_MODE_RX_ONLY_SPORT) continue;
 
             /* --- тестовый генератор --- */
             if (rt->cfg.crsf_test_to_net && now - rt->gen_net_ms >= rc_interval) {

@@ -23,9 +23,9 @@ static void drop_oldest(crsf_txq_t *q)
     q->count--;
 }
 
-crsf_txq_res_t crsf_txq_push(crsf_txq_t *q, const uint8_t *frame, size_t len, uint32_t now_ms)
+crsf_txq_res_t crsf_txq_push_raw(crsf_txq_t *q, const uint8_t *frame, size_t len, uint32_t now_ms)
 {
-    if (crsf_frame_check(frame, len) == 0) {
+    if (!frame || len == 0 || len > CRSF_MAX_FRAME_LEN) {
         q->stats.dropped_invalid++;
         return CRSF_TXQ_INVALID;
     }
@@ -46,6 +46,15 @@ crsf_txq_res_t crsf_txq_push(crsf_txq_t *q, const uint8_t *frame, size_t len, ui
     q->stats.queued++;
     if (q->count > q->stats.depth_max) q->stats.depth_max = q->count;
     return res;
+}
+
+crsf_txq_res_t crsf_txq_push(crsf_txq_t *q, const uint8_t *frame, size_t len, uint32_t now_ms)
+{
+    if (crsf_frame_check(frame, len) == 0) {
+        q->stats.dropped_invalid++;
+        return CRSF_TXQ_INVALID;
+    }
+    return crsf_txq_push_raw(q, frame, len, now_ms);
 }
 
 crsf_txq_res_t crsf_txq_pop(crsf_txq_t *q, uint32_t now_ms, uint8_t *out, size_t *out_len)
