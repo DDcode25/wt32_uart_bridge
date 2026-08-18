@@ -69,6 +69,7 @@ const char *uart_manager_crsf_mode_name(uart_mgr_crsf_mode_t m)
 {
     switch (m) {
         case CRSF_MODE_SINGLE_WIRE:   return "Single-wire CRSF";
+        case CRSF_MODE_FULL_DUPLEX:   return "Full-duplex CRSF";
         case CRSF_MODE_RX_ONLY_SPORT: return "RX-only TX16S S.Port";
         default:                      return "?";
     }
@@ -564,6 +565,16 @@ esp_err_t uart_manager_apply_config(const uart_mgr_channel_cfg_t *cfg)
                  cfg->rx_gpio, (unsigned long)cfg->baud_rate,
                  cfg->invert_rx ? ", line inverted" : "");
         return ESP_OK;
+    }
+
+    if (cfg->protocol == PROTO_MODE_CRSF && cfg->crsf_mode == CRSF_MODE_FULL_DUPLEX) {
+        /* Обычный двухпроводный канал: ни арбитража, ни эха, ни разворотов
+         * линии. Дальше он идёт общим путём с двумя задачами. */
+        ESP_LOGI(TAG, "channel %d (%s): %s, RX GPIO%d / TX GPIO%d, %lu baud, inversion rx=%d tx=%d",
+                 cfg->channel_id, cfg->name,
+                 uart_manager_crsf_mode_name(CRSF_MODE_FULL_DUPLEX),
+                 cfg->rx_gpio, cfg->tx_gpio, (unsigned long)cfg->baud_rate,
+                 cfg->invert_rx, cfg->invert_tx);
     }
 
     if (cfg_is_crsf_rx_only(cfg)) {

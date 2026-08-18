@@ -235,6 +235,18 @@ esp_err_t config_manager_validate(const app_config_t *cfg, char *reason, size_t 
                     return reject(reason, reason_len,
                         "%s: single-wire CRSF вимагає дуплекс «Half / single-wire»", u->name);
                 }
+            } else if (u->crsf_mode == CRSF_MODE_FULL_DUPLEX) {
+                /* Два провода — два РАЗНЫХ вывода. Одинаковые означали бы
+                 * общую линию, а у неё свой режим и своя дисциплина. */
+                if (u->rx_gpio == u->tx_gpio) {
+                    return reject(reason, reason_len,
+                        "%s: full-duplex CRSF — це ДВА дроти, RX і TX мають бути на різних "
+                        "GPIO (зараз обидва %d)", u->name, u->rx_gpio);
+                }
+                if (u->duplex != UART_DUPLEX_FULL) {
+                    return reject(reason, reason_len,
+                        "%s: full-duplex CRSF вимагає повний дуплекс", u->name);
+                }
             } else {
                 if (u->duplex == UART_DUPLEX_HALF_SINGLE_WIRE) {
                     return reject(reason, reason_len,
@@ -497,16 +509,37 @@ void config_manager_apply_profile(app_config_t *cfg, config_profile_t profile)
             cfg->transport[1].udp_listen_port = PROFILE_LINK_CRSF_PORT;
             link_dest(&cfg->transport[1], PROFILE_LINK_TRANSMITTER_IP);
             cfg->routing[1].uart_to_net = true;
-            cfg->routing[1].net_to_uart = true;
+            /* В ПУЛЬТ НЕ ПИШЕМ, и это не осторожность.
+             *
+             * 2026-08-18: как только в отсек модуля пошёл непрерывный поток
+             * телеметрии, пульт завис и потребовал перезагрузки. Измерение
+             * называет причину: из 10503 отданных туда кадров 9519 вернулись
+             * искажёнными — 91%, — а вместе с ними появились 2106 ошибок CRC
+             * и 9264 некорректных длины, которых до наших посылок не было
+             * вовсе. Стоит прекратить передачу, и та же линия читается
+             * идеально: 4129 кадров, ноль ошибок, ноль коллизий.
+             *
+             * То есть наш передатчик не может прокачать линию отсека модуля,
+             * и в пульт уезжает преимущественно мусор. Включать это обратно
+             * можно только разобравшись, откуда 91% искажений. */
+            cfg->routing[1].net_to_uart = false;
             break;
 
         case PROFILE_F_CRSF_LINK_TRANSMITTER:
+            /* ДВА ПРОВОДА, а не общий. У передатчика выводы приёма и
+             * передачи раздельные, и общая линия здесь только вредила:
+             * ~25 КБ/с собственного эха полностью скрывали настоящие
+             * 188 Б/с телеметрии, отчего она выглядела редкими всплесками.
+             * На двух проводах это ровный поток 13 кадров в секунду при
+             * нуле ошибок синхронизации.
+             *
+             * Инверсия нужна В ОБЕ стороны: без неё на приёме получается
+             * верный тайминг с переставленными битами. */
             cfg->uart[1].protocol   = PROTO_MODE_CRSF;
-            cfg->uart[1].crsf_mode  = CRSF_MODE_SINGLE_WIRE;
-            cfg->uart[1].duplex     = UART_DUPLEX_HALF_SINGLE_WIRE;
-            /* Не 17: этот вывод здесь занят передачей MAVLink. */
-            cfg->uart[1].rx_gpio    = 33;
-            cfg->uart[1].tx_gpio    = 33;
+            cfg->uart[1].crsf_mode  = CRSF_MODE_FULL_DUPLEX;
+            cfg->uart[1].duplex     = UART_DUPLEX_FULL;
+            cfg->uart[1].rx_gpio    = 17;   /* сюда идёт передача sine.link */
+            cfg->uart[1].tx_gpio    = 5;    /* отсюда — в его приём */
             cfg->uart[1].baud_rate  = 400000;
             cfg->uart[1].invert_rx  = true;
             cfg->uart[1].invert_tx  = true;
@@ -524,8 +557,9 @@ void config_manager_apply_profile(app_config_t *cfg, config_profile_t profile)
              * станция напишет первой. */
             cfg->uart[2].protocol   = PROTO_MODE_MAVLINK;
             cfg->uart[2].duplex     = UART_DUPLEX_FULL;
-            cfg->uart[2].rx_gpio    = 5;
-            cfg->uart[2].tx_gpio    = 17;
+            /* 32/33: выводы 17 и 5 ушли под CRSF, см. выше. */
+            cfg->uart[2].rx_gpio    = 32;
+            cfg->uart[2].tx_gpio    = 33;
             cfg->uart[2].baud_rate  = 115200;
             cfg->uart[2].invert_rx  = false;
             cfg->uart[2].invert_tx  = false;
@@ -716,7 +750,7 @@ esp_err_t config_manager_from_json(const char *json, app_config_t *out)
             if (proto >= 0 && proto < PROTO_MODE_MAX) u->protocol = proto;
 
             int cm = json_int(c, "crsf_mode", u->crsf_mode);
-            if (cm == CRSF_MODE_RX_ONLY_SPORT || cm == CRSF_MODE_SINGLE_WIRE) u->crsf_mode = cm;
+            if (cm >= CRSF_MODE_RX_ONLY_SPORT && cm <= CRSF_MODE_FULL_DUPLEX) u->crsf_mode = cm;
             /* Провод один — инверсия одна. Приводим TX к RX здесь, а не
              * только в uart_manager: иначе конфигурация и работа расходятся,
              * и страница показывает настройку, которой линия не подчиняется. */

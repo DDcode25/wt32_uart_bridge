@@ -323,15 +323,21 @@ function syncOneWire(id){
   /* Для CRSF режим — источник истины: он выставляет дуплекс сам, и менять
      дуплекс руками нельзя, иначе прошивка отклонит конфигурацию. */
   if(isCrsf&&cm){
-    dup.value=(+cm.value===1)?1:0;
+    const mode=+cm.value;
+    dup.value=(mode===1)?1:0;
     dup.disabled=true;
-    if(cmhint)cmhint.innerHTML=(+cm.value===1)
-      ?'Спільний двонапрямний провід: RX і TX — ОДИН GPIO, дуплекс half. '+
-       'Потрібна підтяжка до 3.3 В (зовнішня 1–4.7 кОм) і спільний GND. '+
-       'Для прямого CRSF TTL інверсія вимкнена; вмикайте лише за зовнішнього інвертора.'
-      :'Пульт віддає CRSF по S.Port, плата лише слухає. TX GPIO НЕ під’єднується, '+
-       'у дріт не пишеться нічого. Типово: RX GPIO33, 400000 бод, 8N1, інверсія RX увімкнена. '+
-       'Це НЕ двонапрямний CRSF по одному дроту.';
+    const HINTS={
+      1:'Спільний двонапрямний провід: RX і TX — ОДИН GPIO, дуплекс half. '+
+        'Потрібна підтяжка до 3.3 В (зовнішня 1–4.7 кОм) і спільний GND. '+
+        'Для прямого CRSF TTL інверсія вимкнена; вмикайте лише за зовнішнього інвертора.',
+      2:'Два ОКРЕМІ дроти: приймання на одному GPIO, передавання на іншому — вони мають '+
+        'РІЗНИТИСЯ. Найпростіший і найнадійніший режим там, де в пристрою роздільні виводи: '+
+        'немає ні арбітражу лінії, ні власного відлуння, ні колізій. Інверсія в пристрою '+
+        'зазвичай спільна: якщо її потребує приймання, потребує й передавання.',
+      0:'Пульт віддає CRSF по S.Port, плата лише слухає. TX GPIO НЕ під’єднується, '+
+        'у дріт не пишеться нічого. Типово: RX GPIO33, 400000 бод, 8N1, інверсія RX увімкнена. '+
+        'Це НЕ двонапрямний CRSF по одному дроту.'};
+    if(cmhint)cmhint.innerHTML=HINTS[mode]||'';
   }else{
     dup.disabled=false;
     if(cmhint)cmhint.textContent='';
@@ -343,7 +349,7 @@ function syncOneWire(id){
   if(one){const rx=el('c'+id+'_rx'),tx=el('c'+id+'_tx');if(rx&&tx)rx.value=tx.value;}
 }
 const PARITY=["None","Even","Odd"];const STOP=["1","1.5","2"];const DUPLEX=["Full duplex","Half / single-wire","RS-485 half-duplex"];
-const CRSFMODES=["RX-only TX16S S.Port","Single-wire CRSF"];
+const CRSFMODES=["RX-only TX16S S.Port","Single-wire CRSF","Full-duplex CRSF"];
 let cfg=null;
 
 function toast(m,bad){const t=document.getElementById('toast');t.textContent=m;t.style.borderColor=bad?'var(--err)':'var(--ok)';t.style.display='block';setTimeout(()=>t.style.display='none',2600);}
@@ -401,10 +407,10 @@ const PROFDESC={
  /* E і F — дві половини ОДНІЄЇ ланки, знімок робочого стенда. Ставити
     парою: кожна половина шле зустрічній, окремо вони мовчать. */
  5:{t:'E — Ланка CRSF: бік пульта',c:'Змінює лише UART1. Ставиться в парі з профілем F на іншій платі',
-    r:[['UART1','CRSF single-wire, GPIO17 (один дріт), 400000, інверсія в обидва боки','UDP 5050, адресат 192.168.14.51:5050']]},
+    r:[['UART1','CRSF single-wire, GPIO17 (один дріт), 400000, інверсія в обидва боки','UDP 5050, адресат 192.168.14.51:5050, у пульт НЕ пишемо']]},
  6:{t:'F — Ланка CRSF: бік передавача',c:'Змінює UART1 і UART2. Ставиться в парі з профілем E на іншій платі',
-    r:[['UART1','CRSF single-wire, GPIO33 (не 17 — його тримає MAVLink TX), 400000, інверсія в обидва боки','UDP 5050, адресат 192.168.14.50:5050'],
-       ['UART2','MAVLink, приймання GPIO5 / передача GPIO17, 115200','UDP 14550, адресат 192.168.14.77:14550']]}};
+    r:[['UART1','CRSF full-duplex, два дроти: приймання GPIO17 / передавання GPIO5, 400000, інверсія в обидва боки','UDP 5050, адресат 192.168.14.50:5050'],
+       ['UART2','MAVLink, приймання GPIO32 / передавання GPIO33, 115200','UDP 14550, адресат 192.168.14.77:14550']]}};
 
 function showProf(n){
   const d=document.getElementById('profdesc');
@@ -552,6 +558,9 @@ function collect(){
         c.rx_gpio=c.tx_gpio;
         c.invert_tx=c.invert_rx;
       }else{
+        /* И RX-only, и полный дуплекс — обычный двухпроводный канал.
+           Выводы для полного дуплекса обязаны различаться, это проверит
+           прошивка и откажет с внятной причиной. */
         c.duplex=0;
       }
     }else if(c.duplex===1){
