@@ -371,6 +371,17 @@ static void crsf_sw_task(void *arg)
 esp_err_t crsf_singlewire_start(const crsf_sw_cfg_t *cfg, crsf_sw_frame_cb_t cb, void *ctx)
 {
     if (!cfg || cfg->gpio < 0) return ESP_ERR_INVALID_ARG;
+
+    /* Сервис ОДИН на прошивку: у него одно состояние линии, один разбор и
+     * одна очередь. Молчаливый перезапуск на другом порту оставлял бы
+     * первый канал в состоянии «работает» по всем признакам, тогда как его
+     * драйвер уже удалён этим вызовом. Проверка конфигурации такое сочетание
+     * тоже отклоняет, но полагаться на неё одну нельзя. */
+    if (s.running && s.cfg.port != cfg->port) {
+        ESP_LOGE(TAG, "single-wire service is already running on UART%d, refusing UART%d",
+                 (int)s.cfg.port, (int)cfg->port);
+        return ESP_ERR_INVALID_STATE;
+    }
     if (s.running) crsf_singlewire_stop();
 
     memset(&s, 0, sizeof(s));

@@ -293,6 +293,23 @@ esp_err_t config_manager_validate(const app_config_t *cfg, char *reason, size_t 
         }
     }
 
+    /* Однопроводный сервис в прошивке один: у него одно состояние линии,
+     * один разбор и одна очередь. Второй канал в том же режиме молча
+     * отобрал бы его у первого, и тот остался бы «работающим» по всем
+     * признакам с удалённым драйвером. */
+    int single_wire_owner = -1;
+    for (int i = 0; i < UART_MGR_NUM_CHANNELS; i++) {
+        const uart_mgr_channel_cfg_t *u = &cfg->uart[i];
+        if (!u->enabled || u->duplex != UART_DUPLEX_HALF_SINGLE_WIRE) continue;
+        if (u->protocol != PROTO_MODE_CRSF && u->protocol != PROTO_MODE_RAW) continue;
+        if (single_wire_owner >= 0) {
+            return reject(reason, reason_len,
+                "однодротовий режим можливий лише на одному каналі: %s і %s",
+                cfg->uart[single_wire_owner].name, u->name);
+        }
+        single_wire_owner = i;
+    }
+
     /* Порты слушателей. Проверяется НЕЗАВИСИМО от uart.enabled: транспорт
      * поднимается для всех каналов, выключенный UART свой порт не
      * освобождает. Совпадение молча убивало второй канал — bind падал с
