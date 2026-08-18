@@ -292,7 +292,7 @@ static esp_err_t profile_post(httpd_req_t *req)
     int profile = cJSON_IsNumber(p) ? p->valueint : 0;
     cJSON_Delete(root);
 
-    if (profile < PROFILE_A_SINELINK || profile > PROFILE_D_UNIVERSAL_BRIDGE) {
+    if (profile < PROFILE_A_SINELINK || profile > PROFILE_F_CRSF_LINK_TRANSMITTER) {
         httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "unknown profile");
         return ESP_FAIL;
     }

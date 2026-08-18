@@ -351,6 +351,24 @@ esp_err_t config_manager_validate(const app_config_t *cfg, char *reason, size_t 
 
 /* ---------------- profiles ---------------- */
 
+/* Задать ЕДИНСТВЕННОГО адресата канала и погасить остальные: профиль
+ * описывает связку целиком, и оставшийся от прежней настройки лишний
+ * адресат размножил бы поток управления по чужим адресам. */
+static void link_dest_port(transport_cfg_t *t, const char *ip, uint16_t port)
+{
+    for (int i = 0; i < TRANSPORT_MAX_DESTINATIONS; i++) {
+        t->udp_destinations[i].enabled = false;
+    }
+    t->udp_destinations[0].ip      = inet_addr(ip);
+    t->udp_destinations[0].port    = port;
+    t->udp_destinations[0].enabled = true;
+}
+
+static void link_dest(transport_cfg_t *t, const char *ip)
+{
+    link_dest_port(t, ip, PROFILE_LINK_CRSF_PORT);
+}
+
 void config_manager_apply_profile(app_config_t *cfg, config_profile_t profile)
 {
     cfg->active_profile = profile;
@@ -434,6 +452,89 @@ void config_manager_apply_profile(app_config_t *cfg, config_profile_t profile)
                 cfg->routing[i].uart_to_net = true;
                 cfg->routing[i].net_to_uart = true;
             }
+            break;
+
+        /* --- Две половины одной связки CRSF по Ethernet ---
+         *
+         * Профили сняты с работающего стенда 2026-08-18, а не придуманы.
+         * Пульт TX16S подключён к одной плате общим проводом, передатчик
+         * sine.link — к другой, между ними Ethernet. Ставить их надо ПАРОЙ:
+         * каждая половина отправляет встречной, и по отдельности они молчат.
+         *
+         * Числа, которые НЕЛЬЗЯ менять «на глаз», потому что каждое стоило
+         * отдельной проверки на живой линии:
+         *
+         *   инверсия — включена в ОБЕ стороны на обеих платах. Провод один,
+         *     полярность у него одна. Без инверсии линия отдаёт байты, но ни
+         *     одного целого кадра: замер 19906 байт за 8 секунд, кадров ноль,
+         *     ошибок тоже ноль — разбор просто не находит начала кадра;
+         *
+         *   400000 бод — не 420000. На 420000 та же линия дала ноль кадров
+         *     против двух и вдвое меньше опознанных начал;
+         *
+         *   GPIO у сторон РАЗНЫЕ: 17 у пульта, 33 у передатчика. Это не
+         *     симметрия, а следствие занятости выводов: на стороне
+         *     передатчика GPIO17 держит MAVLink TX.
+         *
+         * Здоровые числа на связке: 252 кадра/с с провода пульта, столько же
+         * в сеть, 248 из них в провод передатчика, ошибок CRC около одной за
+         * десять секунд, коллизий ноль.
+         *
+         * Телеметрии на пульте эти профили НЕ дают: мост её не сочиняет
+         * (см. коммит bfc450d), а обратный поток с передатчика как CRSF не
+         * разбирается. Это ожидаемое поведение, а не недонастройка. */
+        case PROFILE_E_CRSF_LINK_HANDSET:
+            cfg->uart[1].protocol   = PROTO_MODE_CRSF;
+            cfg->uart[1].crsf_mode  = CRSF_MODE_SINGLE_WIRE;
+            cfg->uart[1].duplex     = UART_DUPLEX_HALF_SINGLE_WIRE;
+            cfg->uart[1].rx_gpio    = 17;   /* один провод в отсек модуля */
+            cfg->uart[1].tx_gpio    = 17;
+            cfg->uart[1].baud_rate  = 400000;
+            cfg->uart[1].invert_rx  = true;
+            cfg->uart[1].invert_tx  = true;
+            cfg->uart[1].enabled    = true;
+            cfg->transport[1].mode  = NET_MODE_UDP;
+            cfg->transport[1].udp_listen_port = PROFILE_LINK_CRSF_PORT;
+            link_dest(&cfg->transport[1], PROFILE_LINK_TRANSMITTER_IP);
+            cfg->routing[1].uart_to_net = true;
+            cfg->routing[1].net_to_uart = true;
+            break;
+
+        case PROFILE_F_CRSF_LINK_TRANSMITTER:
+            cfg->uart[1].protocol   = PROTO_MODE_CRSF;
+            cfg->uart[1].crsf_mode  = CRSF_MODE_SINGLE_WIRE;
+            cfg->uart[1].duplex     = UART_DUPLEX_HALF_SINGLE_WIRE;
+            /* Не 17: этот вывод здесь занят передачей MAVLink. */
+            cfg->uart[1].rx_gpio    = 33;
+            cfg->uart[1].tx_gpio    = 33;
+            cfg->uart[1].baud_rate  = 400000;
+            cfg->uart[1].invert_rx  = true;
+            cfg->uart[1].invert_tx  = true;
+            cfg->uart[1].enabled    = true;
+            cfg->transport[1].mode  = NET_MODE_UDP;
+            cfg->transport[1].udp_listen_port = PROFILE_LINK_CRSF_PORT;
+            link_dest(&cfg->transport[1], PROFILE_LINK_HANDSET_IP);
+            cfg->routing[1].uart_to_net = true;
+            cfg->routing[1].net_to_uart = true;
+
+            /* MAVLink с полётного контроллера — отдельным каналом и отдельным
+             * потоком. Выводы легко переставить местами: приём GPIO5,
+             * передача GPIO17, и наоборот канал выглядит настроенным, но
+             * молчит. Адресат задан явно, иначе поток ждёт, пока наземная
+             * станция напишет первой. */
+            cfg->uart[2].protocol   = PROTO_MODE_MAVLINK;
+            cfg->uart[2].duplex     = UART_DUPLEX_FULL;
+            cfg->uart[2].rx_gpio    = 5;
+            cfg->uart[2].tx_gpio    = 17;
+            cfg->uart[2].baud_rate  = 115200;
+            cfg->uart[2].invert_rx  = false;
+            cfg->uart[2].invert_tx  = false;
+            cfg->uart[2].enabled    = true;
+            cfg->transport[2].mode  = NET_MODE_UDP;
+            cfg->transport[2].udp_listen_port = 14550;
+            link_dest_port(&cfg->transport[2], PROFILE_LINK_GCS_IP, 14550);
+            cfg->routing[2].uart_to_net = true;
+            cfg->routing[2].net_to_uart = true;
             break;
 
         case PROFILE_NONE:

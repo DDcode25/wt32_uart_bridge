@@ -41,7 +41,19 @@ typedef enum {
     PROFILE_B_MISSION_PLANNER,
     PROFILE_C_TX16S,
     PROFILE_D_UNIVERSAL_BRIDGE,
+    /* Две половины ОДНОЙ связки: пульт на одном конце Ethernet, передатчик
+     * на другом. Ставятся парой, порознь смысла не имеют. Значения взяты не
+     * из головы, а сняты с работающего стенда, см. config_manager.c. */
+    PROFILE_E_CRSF_LINK_HANDSET,
+    PROFILE_F_CRSF_LINK_TRANSMITTER,
 } config_profile_t;
+
+/* Адреса плат в связке. Профиль задаёт адресата, а он у каждой стороны свой —
+ * встречная плата. Оба профиля пишут ЧУЖОЙ адрес из этой пары. */
+#define PROFILE_LINK_HANDSET_IP       "192.168.14.50"
+#define PROFILE_LINK_TRANSMITTER_IP   "192.168.14.51"
+#define PROFILE_LINK_GCS_IP           "192.168.14.77"
+#define PROFILE_LINK_CRSF_PORT        5050
 
 typedef struct {
     uint32_t schema_version;

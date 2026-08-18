@@ -149,6 +149,8 @@ input.port{width:90px}
       <button class="act ghost" data-prof="2" onclick="applyProfile(2)">B — Mission Planner</button>
       <button class="act ghost" data-prof="3" onclick="applyProfile(3)">C — RadioMaster TX16S</button>
       <button class="act ghost" data-prof="4" onclick="applyProfile(4)">D — Універсальний міст</button>
+      <button class="act ghost" data-prof="5" onclick="applyProfile(5)">E — Ланка CRSF: бік пульта</button>
+      <button class="act ghost" data-prof="6" onclick="applyProfile(6)">F — Ланка CRSF: бік передавача</button>
     </div>
     <div id="profdesc"></div>
   </div>
@@ -395,7 +397,14 @@ const PROFDESC={
  4:{t:'D — Універсальний міст',c:'Перезаписує всі три канали, без розбору протоколів',
     r:[['UART0/AUX','RAW','UDP 14550'],
        ['UART1','RAW','UDP 14560'],
-       ['UART2','RAW','UDP 14570']]}};
+       ['UART2','RAW','UDP 14570']]},
+ /* E і F — дві половини ОДНІЄЇ ланки, знімок робочого стенда. Ставити
+    парою: кожна половина шле зустрічній, окремо вони мовчать. */
+ 5:{t:'E — Ланка CRSF: бік пульта',c:'Змінює лише UART1. Ставиться в парі з профілем F на іншій платі',
+    r:[['UART1','CRSF single-wire, GPIO17 (один дріт), 400000, інверсія в обидва боки','UDP 5050, адресат 192.168.14.51:5050']]},
+ 6:{t:'F — Ланка CRSF: бік передавача',c:'Змінює UART1 і UART2. Ставиться в парі з профілем E на іншій платі',
+    r:[['UART1','CRSF single-wire, GPIO33 (не 17 — його тримає MAVLink TX), 400000, інверсія в обидва боки','UDP 5050, адресат 192.168.14.50:5050'],
+       ['UART2','MAVLink, приймання GPIO5 / передача GPIO17, 115200','UDP 14550, адресат 192.168.14.77:14550']]}};
 
 function showProf(n){
   const d=document.getElementById('profdesc');
