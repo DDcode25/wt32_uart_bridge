@@ -2,6 +2,7 @@
 #include "uart_manager.h"
 #include "board_config.h"
 #include "crsf_singlewire.h"
+#include "crsf_echo.h"
 #include "diagnostics.h"   /* передача консоли каналу: diagnostics_capture_log() */
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -41,12 +42,10 @@ typedef struct {
     TaskHandle_t tx_task_handle;
     QueueHandle_t tx_queue;
     /* Однопроводный режим: что именно мы передали и сколько этого уже
-     * опознано во входящем потоке. Сравнение идёт ПО СОДЕРЖИМОМУ, см.
-     * eat_own_echo(). */
-    uint8_t  echo_buf[UART_MGR_TX_BATCH_BYTES];
-    volatile uint32_t echo_len;
-    volatile uint32_t echo_pos;
-    volatile uint32_t echo_deadline_ms;
+     * опознано во входящем потоке. Сравнение идёт ПО СОДЕРЖИМОМУ,
+     * см. crsf_echo.h — там же разобрано, почему не годятся ни отключение
+     * приёма, ни очистка входного FIFO. */
+    crsf_echo_t echo;
     /* Канал отдан однопроводному сервису CRSF: провод, приём, передача и
      * переключение направления там, здесь остаётся только учёт. */
     bool crsf_singlewire;
@@ -241,44 +240,6 @@ static void crsf_sw_frame(const uint8_t *frame, size_t len, void *ctx)
     if (ch->rx_cb) ch->rx_cb(ch->cfg.channel_id, frame, len, ch->rx_cb_ctx);
 }
 
-/* Выбросить из принятого собственную посылку — но только ту её часть,
- * которая ДЕЙСТВИТЕЛЬНО совпадает с переданным.
- *
- * Считать байты и вычитать их вслепую нельзя. Эхо на общем проводе может и
- * не вернуться: приёмник был занят своей же передачей, буфер сбросился,
- * встречный конец придержал линию. Тогда вычитание съедает чужие байты и
- * рвёт чужие кадры — на стенде каждая наша посылка стоила примерно 1.3
- * кадра пульта, что вчетверо дороже самих столкновений и не лечилось ни
- * синхронизацией с паузой, ни сроком годности долга.
- *
- * Сравнение по содержимому решает это без догадок: совпало — наше, не
- * совпало — чужое, отдаём разбору целиком. */
-static int eat_own_echo(uart_channel_t *ch, uint8_t *buf, int len)
-{
-    if (ch->echo_pos >= ch->echo_len) return len;
-
-    /* Просроченное эхо уже не придёт: дальше по проводу идут чужие байты. */
-    if ((uint32_t)(esp_timer_get_time() / 1000) > ch->echo_deadline_ms) {
-        ch->echo_len = ch->echo_pos = 0;
-        return len;
-    }
-
-    int i = 0;
-    while (i < len && ch->echo_pos < ch->echo_len && buf[i] == ch->echo_buf[ch->echo_pos]) {
-        i++;
-        ch->echo_pos++;
-    }
-    if (i < len && ch->echo_pos < ch->echo_len) {
-        /* Разошлось на середине — остальное точно не наше. */
-        ch->echo_len = ch->echo_pos = 0;
-    }
-    if (i > 0) {
-        len -= i;
-        if (len > 0) memmove(buf, buf + i, (size_t)len);
-    }
-    return len;
-}
-
 /* Физическая посылка. Вызывается ТОЛЬКО из задачи передачи. */
 static void tx_write_now(uart_channel_t *ch, const uint8_t *data, size_t len)
 {
@@ -322,12 +283,8 @@ static void tx_write_now(uart_channel_t *ch, const uint8_t *data, size_t len)
          * потока управления), а при сотне посылок в секунду он вдобавок
          * сносил вместе с эхом всю встречную телеметрию. */
         if (written > 0) {
-            size_t n = (size_t)written < sizeof(ch->echo_buf) ? (size_t)written : sizeof(ch->echo_buf);
-            memcpy(ch->echo_buf, data, n);
-            ch->echo_len = (uint32_t)n;
-            ch->echo_pos = 0;
-            ch->echo_deadline_ms = (uint32_t)(esp_timer_get_time() / 1000)
-                                   + UART_MGR_ECHO_DEBT_MS;
+            crsf_echo_expect(&ch->echo, data, (size_t)written,
+                             (uint32_t)(esp_timer_get_time() / 1000), UART_MGR_ECHO_DEBT_MS);
         }
     }
 
@@ -426,7 +383,10 @@ static void rx_task(void *arg)
         /* Съесть эхо собственной посылки: на одном проводе оно приходит
          * первым и ровно той же длины. Дальше в том же чтении может лежать
          * уже настоящий встречный поток — его отдаём как обычно. */
-        if (single_wire && len > 0) len = eat_own_echo(ch, buf, len);
+        if (single_wire && len > 0) {
+            len = (int)crsf_echo_strip(&ch->echo, buf, (size_t)len,
+                                       (uint32_t)(esp_timer_get_time() / 1000), NULL);
+        }
 
         if (len > 0) {
             xSemaphoreTake(ch->lock, portMAX_DELAY);

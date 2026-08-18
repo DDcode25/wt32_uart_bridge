@@ -13,6 +13,7 @@ idf_component_register(
         "protocol_crsf.c"
         "crsf_singlewire.c"
         "crsf_txq.c"
+        "crsf_echo.c"
         "udp_route.c"
         "protocol_sbus.c"
         "protocol_mavlink.c"

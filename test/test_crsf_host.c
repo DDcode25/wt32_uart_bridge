@@ -19,6 +19,7 @@
 #include "../main/protocol_crsf.c"
 #include "../main/crsf_txq.c"
 #include "../main/udp_route.c"
+#include "../main/crsf_echo.c"
 
 static int fails = 0, checks = 0;
 #define CHECK(c, msg) do { checks++; if (c) { printf("  PASS  %s\n", msg); } \
@@ -384,6 +385,92 @@ static void test_udp_route(void)
     CHECK(plan.kind == UDP_ROUTE_NONE, "снятая галочка выключает адресата");
 }
 
+/* ---------- подавление собственного эха ---------- */
+
+static void test_echo(void)
+{
+    printf("== снятие собственного эха ==\n");
+    crsf_echo_t e;
+    memset(&e, 0, sizeof(e));
+
+    uint8_t sent[6] = { 0xC8, 0x04, 0x16, 0x01, 0x02, 0x33 };
+    uint8_t rx[16];
+
+    /* Эхо вернулось целиком и одним куском */
+    crsf_echo_expect(&e, sent, sizeof(sent), 1000, CRSF_ECHO_TTL_MS);
+    memcpy(rx, sent, sizeof(sent));
+    bool mism = false;
+    size_t rest = crsf_echo_strip(&e, rx, sizeof(sent), 1000, &mism);
+    CHECK(rest == 0, "своё эхо снято полностью");
+    CHECK(!mism, "искажений не было");
+    CHECK(!crsf_echo_pending(&e), "долг закрыт");
+
+    /* Эхо пришло двумя кусками, а следом — чужие байты */
+    crsf_echo_expect(&e, sent, sizeof(sent), 1000, CRSF_ECHO_TTL_MS);
+    memcpy(rx, sent, 3);
+    rest = crsf_echo_strip(&e, rx, 3, 1000, NULL);
+    CHECK(rest == 0 && crsf_echo_pending(&e), "часть эха снята, остаток ждёт");
+    memcpy(rx, &sent[3], 3);
+    memcpy(rx + 3, "\xEA\x04", 2);          /* чужое начало сразу за эхом */
+    rest = crsf_echo_strip(&e, rx, 5, 1000, &mism);
+    CHECK(rest == 2, "хвост эха снят, чужие байты остались");
+    CHECK(rx[0] == 0xEA && rx[1] == 0x04, "чужие байты не сдвинуты и не испорчены");
+    CHECK(!mism, "разрыв между чтениями не считается искажением");
+
+    /* Эхо вернулось искажённым: дальше уже не наше */
+    crsf_echo_expect(&e, sent, sizeof(sent), 1000, CRSF_ECHO_TTL_MS);
+    memcpy(rx, sent, sizeof(sent));
+    rx[2] = 0x99;
+    rest = crsf_echo_strip(&e, rx, sizeof(sent), 1000, &mism);
+    CHECK(mism, "искажение эха замечено");
+    CHECK(rest == 4, "совпавшая часть снята, остальное отдано разбору");
+    CHECK(!crsf_echo_pending(&e), "долг списан, чужие байты вычитать нельзя");
+
+    /* Эхо не вернулось вовсе: долг просрочен, чужой поток не трогаем */
+    crsf_echo_expect(&e, sent, sizeof(sent), 1000, CRSF_ECHO_TTL_MS);
+    uint8_t other[4] = { 0xEA, 0x02, 0x14, 0x00 };
+    memcpy(rx, other, sizeof(other));
+    rest = crsf_echo_strip(&e, rx, sizeof(other), 1000 + CRSF_ECHO_TTL_MS + 1, NULL);
+    CHECK(rest == sizeof(other), "просроченный долг не съедает чужие байты");
+    CHECK(memcmp(rx, other, sizeof(other)) == 0, "чужие байты не тронуты");
+
+    /* Переданное не должно уходить обратно в сеть: то, что снято как эхо,
+     * до парсера не доходит вовсе. */
+    crsf_parser_t p; crsf_parser_init(&p);
+    uint16_t ch[CRSF_NUM_CHANNELS];
+    for (int i = 0; i < CRSF_NUM_CHANNELS; i++) ch[i] = 992;
+    uint8_t frame[32];
+    size_t fn = crsf_build_channels_frame(ch, frame, sizeof(frame));
+
+    crsf_echo_expect(&e, frame, fn, 2000, CRSF_ECHO_TTL_MS);
+    uint8_t line[64];
+    memcpy(line, frame, fn);
+    cap_reset();
+    size_t left = crsf_echo_strip(&e, line, fn, 2000, NULL);
+    if (left) crsf_parser_feed(&p, 0, line, left, cap_cb, NULL);
+    CHECK(cap_n == 0, "собственный переданный кадр не уходит обратно в сеть");
+}
+
+static void test_txq_purge(void)
+{
+    printf("== очистка устаревшего без передачи ==\n");
+    crsf_txq_t q;
+    crsf_txq_init(&q, 40);
+    uint16_t ch[CRSF_NUM_CHANNELS];
+    for (int i = 0; i < CRSF_NUM_CHANNELS; i++) ch[i] = 992;
+    uint8_t fr[32];
+    size_t n = crsf_build_channels_frame(ch, fr, sizeof(fr));
+
+    crsf_txq_push(&q, fr, n, 100);
+    crsf_txq_push(&q, fr, n, 130);
+    CHECK(crsf_txq_purge_stale(&q, 150) == 1, "устарел только первый кадр");
+    CHECK(crsf_txq_depth(&q) == 1, "второй остался в очереди");
+    CHECK(crsf_txq_has_fresh(&q, 150), "и считается свежим");
+    CHECK(crsf_txq_purge_stale(&q, 200) == 1, "потом устарел и он");
+    CHECK(crsf_txq_depth(&q) == 0, "очередь очищена, а не стоит полной");
+    CHECK(q.stats.dropped_stale == 2, "оба учтены как устаревшие");
+}
+
 int main(void)
 {
     test_crc();
@@ -396,7 +483,9 @@ int main(void)
     test_broadcast_addr();
     test_udp_split();
     test_txq();
+    test_txq_purge();
     test_udp_route();
+    test_echo();
 
     printf("\n%s: %d проверок, %d провалов\n",
            fails ? "ТЕСТЫ НЕ ПРОШЛИ" : "ВСЕ ТЕСТЫ ПРОШЛИ", checks, fails);

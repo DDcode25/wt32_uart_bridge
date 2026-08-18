@@ -2,6 +2,7 @@
 #include "crsf_singlewire.h"
 #include "protocol_crsf.h"
 #include "crsf_txq.h"
+#include "crsf_echo.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/queue.h"
@@ -35,9 +36,7 @@ static struct {
     int64_t         last_tx_us;
     /* Хвост собственного эха, который не успел доехать к моменту чтения
      * сразу после посылки. Досопоставляется в следующих чтениях. */
-    uint8_t         echo_tail[CRSF_MAX_FRAME_LEN];
-    uint8_t         echo_tail_len;
-    uint8_t         echo_tail_pos;
+    crsf_echo_t     echo;
     volatile bool   running;
     volatile bool   should_exit;
 } s;
@@ -153,32 +152,26 @@ static void transmit_frame(const uint8_t *data, size_t len)
      * начавшийся во время передачи: на стенде это стоило 43 кадров пульта
      * в секунду при двадцати посылках. Сверка по содержимому теряет только
      * то, что действительно наше; всё, что разошлось, идёт в разбор. */
+    crsf_echo_expect(&s.echo, data, len, now_ms(), CRSF_ECHO_TTL_MS);
+
     uint8_t echo[CRSF_MAX_FRAME_LEN];
     int got = uart_read_bytes(s.cfg.port, echo, len, 0);
-    int k = 0;
     if (got > 0) {
-        while (k < got && k < (int)len && echo[k] == data[k]) k++;
-        if (k < got) {
-            /* Разошлось — дальше уже не наше, отдаём разбору как есть. */
-            s.stats.echo_mismatches++;
-            crsf_parser_feed(&s.parser, 0, &echo[k], (size_t)(got - k), on_frame, NULL);
-            k = (int)len;   /* остаток эха потерян вместе с совпадением */
-        }
+        bool mismatch = false;
+        size_t rest = crsf_echo_strip(&s.echo, echo, (size_t)got, now_ms(), &mismatch);
+        if (mismatch) s.stats.echo_mismatches++;
+        /* Всё, что не наше, идёт в разбор как обычный приём: во время
+         * передачи встречная сторона могла заговорить, и её байты терять
+         * нельзя. */
+        if (rest) crsf_parser_feed(&s.parser, 0, echo, rest, on_frame, NULL);
     }
 
     /* Драйвер отдаёт хвост принятого только после своего таймаута простоя,
      * поэтому к этому моменту эхо доезжает не целиком. Недобранное
-     * запоминаем и снимаем в следующих чтениях — иначе оно уходит в разбор
-     * как мусор: на стенде это давало полторы сотни ошибок длины в секунду
-     * и «приём» размером в половину собственной передачи. */
-    if (k < (int)len) {
-        s.echo_tail_len = (uint8_t)((int)len - k);
-        s.echo_tail_pos = 0;
-        memcpy(s.echo_tail, &data[k], s.echo_tail_len);
-    } else {
-        s.echo_tail_len = s.echo_tail_pos = 0;
-        s.stats.echo_suppressed++;
-    }
+     * остаётся в долге и снимается в следующих чтениях — иначе оно уходит
+     * в разбор как мусор: на стенде это давало полторы сотни ошибок длины
+     * в секунду и «приём» размером в половину собственной передачи. */
+    if (!crsf_echo_pending(&s.echo)) s.stats.echo_suppressed++;
 
     if (written > 0) {
         s.stats.tx_frames++;
@@ -283,13 +276,12 @@ static void crsf_sw_task(void *arg)
                     if (n <= 0) break;
                     s.stats.rx_bytes += n;
                     /* Сначала снять остаток собственного эха. */
-                    uint8_t *pb = buf; size_t pn = (size_t)n;
-                    while (pn && s.echo_tail_pos < s.echo_tail_len &&
-                           *pb == s.echo_tail[s.echo_tail_pos]) { pb++; pn--; s.echo_tail_pos++; }
-                    if (pn && s.echo_tail_pos < s.echo_tail_len) {
-                        s.stats.echo_mismatches++;
-                        s.echo_tail_len = s.echo_tail_pos = 0;   /* дальше не наше */
-                    }
+                    bool was_pending = crsf_echo_pending(&s.echo);
+                    bool mismatch = false;
+                    size_t pn = crsf_echo_strip(&s.echo, buf, (size_t)n, now_ms(), &mismatch);
+                    if (mismatch) s.stats.echo_mismatches++;
+                    else if (was_pending && !crsf_echo_pending(&s.echo)) s.stats.echo_suppressed++;
+                    uint8_t *pb = buf;
                     if (!pn) continue;
 
                     if (s.cfg.raw) {
