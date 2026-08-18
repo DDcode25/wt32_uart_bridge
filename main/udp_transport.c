@@ -10,6 +10,7 @@
 #include <errno.h>
 #include "transport.h"
 #include "transport_internal.h"
+#include "uart_manager.h"   /* UART_MGR_DATA_CORE */
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
@@ -118,7 +119,8 @@ esp_err_t udp_transport_start(transport_channel_t *ch)
 
     char task_name[20];
     snprintf(task_name, sizeof(task_name), "udp%d_rx", ch->cfg.channel_id);
-    if (xTaskCreate(udp_rx_task, task_name, 4096, ch, 9, &ch->udp_task) != pdPASS) {
+    if (xTaskCreatePinnedToCore(udp_rx_task, task_name, 4096, ch, 9, &ch->udp_task,
+                                UART_MGR_DATA_CORE) != pdPASS) {
         close(ch->udp_sock);
         ch->udp_sock = -1;
         return ESP_FAIL;

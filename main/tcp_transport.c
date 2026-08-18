@@ -13,6 +13,7 @@
 #include <unistd.h>
 #include "transport.h"
 #include "transport_internal.h"
+#include "uart_manager.h"   /* UART_MGR_DATA_CORE */
 #include "esp_log.h"
 #include "esp_timer.h"
 
@@ -195,7 +196,8 @@ esp_err_t tcp_transport_start_server(transport_channel_t *ch)
 
     char task_name[20];
     snprintf(task_name, sizeof(task_name), "tcp%d_srv", ch->cfg.channel_id);
-    if (xTaskCreate(tcp_server_task, task_name, 4608, ch, 9, &ch->tcp_task) != pdPASS) {
+    if (xTaskCreatePinnedToCore(tcp_server_task, task_name, 4608, ch, 9, &ch->tcp_task,
+                                UART_MGR_DATA_CORE) != pdPASS) {
         close(ch->tcp_listen_sock);
         ch->tcp_listen_sock = -1;
         return ESP_FAIL;
