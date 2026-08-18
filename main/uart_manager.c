@@ -33,8 +33,7 @@ typedef struct {
 typedef struct {
     uart_mgr_channel_cfg_t cfg;
     uart_mgr_stats_t stats;
-    dump_state_t dump_rx;
-    dump_state_t dump_tx;
+    dump_state_t dump[UART_DUMP_DIRS];
     bool dump_enabled;   /* рантайм-флаг, в NVS не сохраняется */
     uart_mgr_rx_cb_t rx_cb;
     void *rx_cb_ctx;
@@ -192,11 +191,23 @@ static uart_stop_bits_t map_stopbits(uart_mgr_stopbits_t s)
  * Уровень намеренно WARN, а не INFO: diagnostics_set_verbose(false)
  * поднимает порог логов до WARN, и дамп, включённый пользователем явно,
  * молча исчезал бы вместе с отладочными сообщениями. */
-static void dump_bytes(uart_channel_t *ch, dump_state_t *st, const char *dir,
+static const char *dump_dir_name(uart_mgr_dump_dir_t d)
+{
+    switch (d) {
+        case UART_DUMP_UART_RX: return "UART RX";
+        case UART_DUMP_UART_TX: return "UART TX";
+        case UART_DUMP_UDP_RX:  return "UDP RX";
+        case UART_DUMP_ECHO:    return "echo suppressed";
+        default:                return "?";
+    }
+}
+
+static void dump_bytes(uart_channel_t *ch, uart_mgr_dump_dir_t dir,
                        const uint8_t *data, size_t len)
 {
-    if (!ch->dump_enabled || len == 0) return;
+    if (!ch->dump_enabled || len == 0 || dir >= UART_DUMP_DIRS) return;
 
+    dump_state_t *st = &ch->dump[dir];
     uint32_t now = (uint32_t)(esp_timer_get_time() / 1000);
     if (st->last_ms && (now - st->last_ms) < UART_MGR_DUMP_MIN_INTERVAL_MS) {
         st->skipped_chunks++;
@@ -215,13 +226,29 @@ static void dump_bytes(uart_channel_t *ch, dump_state_t *st, const char *dir,
     const char *ellipsis = (show < len) ? " ..." : "";
     if (st->skipped_chunks) {
         ESP_LOGW(TAG, "%s %s %uB: %s%s [пропущено %u порцій / %u Б]",
-                 ch->cfg.name, dir, (unsigned)len, hex, ellipsis,
+                 ch->cfg.name, dump_dir_name(dir), (unsigned)len, hex, ellipsis,
                  (unsigned)st->skipped_chunks, (unsigned)st->skipped_bytes);
         st->skipped_chunks = 0;
         st->skipped_bytes  = 0;
     } else {
-        ESP_LOGW(TAG, "%s %s %uB: %s%s", ch->cfg.name, dir, (unsigned)len, hex, ellipsis);
+        ESP_LOGW(TAG, "%s %s %uB: %s%s", ch->cfg.name, dump_dir_name(dir),
+                 (unsigned)len, hex, ellipsis);
     }
+}
+
+void uart_manager_dump(uint8_t channel_id, uart_mgr_dump_dir_t dir,
+                       const uint8_t *data, size_t len)
+{
+    if (channel_id >= UART_MGR_NUM_CHANNELS) return;
+    dump_bytes(&s_channels[channel_id], dir, data, len);
+}
+
+/* Эхо, снятое однопроводным сервисом CRSF. Сервис не знает номера канала —
+ * он ведёт провод, а не канал, — поэтому дамп идёт через колбэк. */
+static void crsf_sw_echo_dump(const uint8_t *data, size_t len, void *ctx)
+{
+    uart_channel_t *ch = (uart_channel_t *)ctx;
+    dump_bytes(ch, UART_DUMP_ECHO, data, len);
 }
 
 /* Кадр, принятый однопроводным сервисом. Дальше он идёт тем же путём, что
@@ -236,7 +263,7 @@ static void crsf_sw_frame(const uint8_t *frame, size_t len, void *ctx)
     ch->stats.last_rx_time_ms = (uint32_t)(esp_timer_get_time() / 1000);
     xSemaphoreGive(ch->lock);
 
-    dump_bytes(ch, &ch->dump_rx, "RX", frame, len);
+    dump_bytes(ch, UART_DUMP_UART_RX, frame, len);
     if (ch->rx_cb) ch->rx_cb(ch->cfg.channel_id, frame, len, ch->rx_cb_ctx);
 }
 
@@ -292,7 +319,7 @@ static void tx_write_now(uart_channel_t *ch, const uint8_t *data, size_t len)
         xSemaphoreTake(ch->lock, portMAX_DELAY);
         ch->stats.tx_bytes += written;
         xSemaphoreGive(ch->lock);
-        dump_bytes(ch, &ch->dump_tx, "TX", data, (size_t)written);
+        dump_bytes(ch, UART_DUMP_UART_TX, data, (size_t)written);
     }
 }
 
@@ -394,7 +421,7 @@ static void rx_task(void *arg)
             ch->stats.last_rx_time_ms = (uint32_t)(esp_timer_get_time() / 1000);
             xSemaphoreGive(ch->lock);
 
-            dump_bytes(ch, &ch->dump_rx, "RX", buf, (size_t)len);
+            dump_bytes(ch, UART_DUMP_UART_RX, buf, (size_t)len);
 
             if (ch->rx_cb) {
                 ch->rx_cb(ch->cfg.channel_id, buf, (size_t)len, ch->rx_cb_ctx);
@@ -522,6 +549,7 @@ esp_err_t uart_manager_apply_config(const uart_mgr_channel_cfg_t *cfg)
              * добавляет от себя. */
             .raw    = (cfg->protocol == PROTO_MODE_RAW),
         };
+        crsf_singlewire_set_echo_dump_cb(crsf_sw_echo_dump, ch);
         esp_err_t swerr = crsf_singlewire_start(&sw, crsf_sw_frame, ch);
         if (swerr != ESP_OK) {
             ESP_LOGE(TAG, "channel %d: single-wire CRSF start failed: %s",
@@ -707,7 +735,7 @@ esp_err_t uart_manager_write(uint8_t channel_id, const uint8_t *data, size_t len
             xSemaphoreTake(ch->lock, portMAX_DELAY);
             ch->stats.tx_bytes += len;
             xSemaphoreGive(ch->lock);
-            dump_bytes(ch, &ch->dump_tx, "TX", data, len);
+            dump_bytes(ch, UART_DUMP_UART_TX, data, len);
         } else {
             xSemaphoreTake(ch->lock, portMAX_DELAY);
             ch->stats.tx_dropped += (uint32_t)len;
@@ -747,8 +775,7 @@ esp_err_t uart_manager_set_dump(uint8_t channel_id, bool enabled)
     ch->dump_enabled = enabled;
     /* Счётчики прореживания сбрасываем, иначе первая же строка после
      * включения соврала бы про пропуски, накопленные в прошлый раз. */
-    ch->dump_rx = (dump_state_t){0};
-    ch->dump_tx = (dump_state_t){0};
+    memset(ch->dump, 0, sizeof(ch->dump));
     ESP_LOGW(TAG, "%s: traffic dump %s", ch->cfg.name, enabled ? "ON" : "OFF");
     return ESP_OK;
 }

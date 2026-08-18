@@ -20,6 +20,10 @@ static const char *TAG = "crsf_sw";
 #define EVENT_QUEUE_LEN   20
 #define READ_CHUNK        128
 
+/* Сколько байт снятого эха хватает показать в дампе. Дамп всё равно
+ * обрезает строку, так что копировать больше незачем. */
+#define ECHO_DUMP_MAX_BYTES 32
+
 static struct {
     crsf_sw_cfg_t   cfg;
     crsf_sw_stats_t stats;
@@ -40,6 +44,22 @@ static struct {
     volatile bool   running;
     volatile bool   should_exit;
 } s;
+
+/* Колбэк дампа живёт ОТДЕЛЬНО от состояния сервиса: crsf_singlewire_start()
+ * обнуляет s целиком, а ставится колбэк до старта. */
+static crsf_sw_echo_dump_cb_t s_echo_dump_cb;
+static void                  *s_echo_dump_ctx;
+
+void crsf_singlewire_set_echo_dump_cb(crsf_sw_echo_dump_cb_t cb, void *ctx)
+{
+    s_echo_dump_cb  = cb;
+    s_echo_dump_ctx = ctx;
+}
+
+static void echo_dump(const uint8_t *data, size_t len)
+{
+    if (s_echo_dump_cb && len) s_echo_dump_cb(data, len, s_echo_dump_ctx);
+}
 
 static uint32_t now_ms(void) { return (uint32_t)(esp_timer_get_time() / 1000); }
 
@@ -159,6 +179,7 @@ static void transmit_frame(const uint8_t *data, size_t len)
     if (got > 0) {
         bool mismatch = false;
         size_t rest = crsf_echo_strip(&s.echo, echo, (size_t)got, now_ms(), &mismatch);
+        if ((size_t)got > rest) echo_dump(data, (size_t)got - rest);
         if (mismatch) s.stats.echo_mismatches++;
         /* Всё, что не наше, идёт в разбор как обычный приём: во время
          * передачи встречная сторона могла заговорить, и её байты терять
@@ -278,7 +299,20 @@ static void crsf_sw_task(void *arg)
                     /* Сначала снять остаток собственного эха. */
                     bool was_pending = crsf_echo_pending(&s.echo);
                     bool mismatch = false;
+                    /* Снимок начала ДО снятия эха: crsf_echo_strip сдвигает
+                     * буфер на месте, и после вызова снятых байт там уже
+                     * нет — дамп напечатал бы то, что осталось, выдав это
+                     * за то, что убрали. Копия короткая, длиннее в лог всё
+                     * равно не попадёт. */
+                    uint8_t pre[ECHO_DUMP_MAX_BYTES];
+                    size_t  pre_n = 0;
+                    if (was_pending && s_echo_dump_cb) {
+                        pre_n = (size_t)n < sizeof(pre) ? (size_t)n : sizeof(pre);
+                        memcpy(pre, buf, pre_n);
+                    }
                     size_t pn = crsf_echo_strip(&s.echo, buf, (size_t)n, now_ms(), &mismatch);
+                    size_t eaten = (size_t)n - pn;
+                    if (eaten) echo_dump(pre, eaten < pre_n ? eaten : pre_n);
                     if (mismatch) s.stats.echo_mismatches++;
                     else if (was_pending && !crsf_echo_pending(&s.echo)) s.stats.echo_suppressed++;
                     uint8_t *pb = buf;

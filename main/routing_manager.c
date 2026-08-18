@@ -138,6 +138,11 @@ static void on_net_rx(uint8_t channel_id, const uint8_t *data, size_t len, void 
         return;
     }
 
+    /* Отдельная метка в дампе. Из сети и с провода приходит один и тот же
+     * протокол, в hex они неотличимы, а означают противоположное — без
+     * метки дамп общего провода читать невозможно. */
+    uart_manager_dump(channel_id, UART_DUMP_UDP_RX, data, len);
+
     switch (ucfg.protocol) {
         case PROTO_MODE_CRSF: {
             uint32_t before = rt->net_parsers.crsf.state.link_stats_frame_ms;

@@ -164,6 +164,13 @@ typedef void (*crsf_sw_frame_cb_t)(const uint8_t *frame, size_t len, void *ctx);
 
 esp_err_t crsf_singlewire_start(const crsf_sw_cfg_t *cfg,
                                 crsf_sw_frame_cb_t cb, void *ctx);
+
+/* Дамп снятого собственного эха. Сервис ведёт провод, а не канал, и номера
+ * канала не знает — поэтому байты отдаются наружу колбэком, а решение,
+ * печатать их или нет, принимает тот, кто владеет каналом. Ставится ДО
+ * crsf_singlewire_start(): старт обнуляет состояние сервиса целиком. */
+typedef void (*crsf_sw_echo_dump_cb_t)(const uint8_t *data, size_t len, void *ctx);
+void crsf_singlewire_set_echo_dump_cb(crsf_sw_echo_dump_cb_t cb, void *ctx);
 esp_err_t crsf_singlewire_stop(void);
 bool      crsf_singlewire_running(void);
 

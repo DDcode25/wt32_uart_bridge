@@ -250,6 +250,22 @@ void uart_manager_default_config(uint8_t channel_id, uart_mgr_channel_cfg_t *out
 esp_err_t uart_manager_set_dump(uint8_t channel_id, bool enabled);
 bool      uart_manager_get_dump(uint8_t channel_id);
 
+/* Откуда взялись байты в дампе. Метки раздельные, потому что на общем
+ * проводе перепутать их проще всего: своё эхо, чужой кадр и то, что пришло
+ * из сети, выглядят в hex одинаково, а означают ровно противоположное.
+ * Каждое направление прореживается независимо — иначе плотный поток RC не
+ * даёт увидеть редкую посылку в обратную сторону. */
+typedef enum {
+    UART_DUMP_UART_RX = 0,   /* пришло с провода */
+    UART_DUMP_UART_TX,       /* отдано в провод */
+    UART_DUMP_UDP_RX,        /* пришло из сети */
+    UART_DUMP_ECHO,          /* снято как собственное эхо */
+    UART_DUMP_DIRS
+} uart_mgr_dump_dir_t;
+
+void uart_manager_dump(uint8_t channel_id, uart_mgr_dump_dir_t dir,
+                       const uint8_t *data, size_t len);
+
 #ifdef __cplusplus
 }
 #endif
