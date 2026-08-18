@@ -42,10 +42,10 @@ jobs:
       - name: Install tools
         run: pip install --upgrade platformio "esptool<5"
 
+      # Тесты компилируют настоящие исходники прошивки (main/*.c) с
+      # заглушками ESP-IDF, а не копию логики рядом с ними.
       - name: Host protocol tests
-        run: |
-          gcc -Wall -O2 -o /tmp/test_protocols test/test_protocols_host.c
-          /tmp/test_protocols
+        run: test/run_host_tests.sh
 
       - name: Build firmware
         run: |
