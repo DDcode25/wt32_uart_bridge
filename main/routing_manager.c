@@ -35,6 +35,11 @@ typedef struct {
     /* Скольким кадрам сменили адрес назначения по дороге в провод. */
     uint32_t crsf_retargeted;
 
+    /* Ограничитель темпа: когда пропустили последний кадр и сколько
+     * выбросили. */
+    uint32_t rate_last_ms;
+    uint32_t rate_dropped;
+
 } routing_channel_t;
 
 static routing_channel_t s_rt[UART_MGR_NUM_CHANNELS];
@@ -117,6 +122,21 @@ static void passthrough_to_uart(uint8_t channel_id, const uint8_t *data, size_t 
 static void net_frame_to_uart(const uint8_t *frame, size_t len, void *ctx)
 {
     routing_channel_t *rt = (routing_channel_t *)ctx;
+
+    /* Ограничитель темпа. Стоит ПЕРЕД всем остальным: смысл в том, чтобы
+     * реже трогать линию, а не в том, чтобы обработать кадр и промолчать.
+     *
+     * Считаем от последней ПРОПУЩЕННОЙ посылки, а не по расписанию: при
+     * неравномерном источнике расписание пропускало бы пачками. */
+    if (rt->cfg.crsf_to_uart_max_hz) {
+        uint32_t now = (uint32_t)(esp_timer_get_time() / 1000);
+        uint32_t gap = 1000u / rt->cfg.crsf_to_uart_max_hz;
+        if (rt->rate_last_ms && (uint32_t)(now - rt->rate_last_ms) < gap) {
+            rt->rate_dropped++;
+            return;
+        }
+        rt->rate_last_ms = now;
+    }
 
     /* Смена адреса назначения, если канал её просит. Копия нужна потому,
      * что исходный буфер принадлежит транспорту и может содержать другие
@@ -375,4 +395,10 @@ uint32_t routing_manager_get_retargeted(uint8_t channel_id)
 {
     if (channel_id >= UART_MGR_NUM_CHANNELS) return 0;
     return s_rt[channel_id].crsf_retargeted;
+}
+
+uint32_t routing_manager_get_rate_dropped(uint8_t channel_id)
+{
+    if (channel_id >= UART_MGR_NUM_CHANNELS) return 0;
+    return s_rt[channel_id].rate_dropped;
 }

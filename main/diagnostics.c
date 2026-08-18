@@ -478,6 +478,8 @@ char *diagnostics_status_json(void)
                      * назначения — иначе подмена была бы невидимой. */
                     cJSON_AddNumberToObject(nj, "retargeted",
                                             routing_manager_get_retargeted(i));
+                    cJSON_AddNumberToObject(nj, "rate_dropped",
+                                            routing_manager_get_rate_dropped(i));
                     cJSON_AddItemToObject(c, "crsf_from_net", nj);
                 }
             } else if (ucfg.protocol == PROTO_MODE_SBUS) {

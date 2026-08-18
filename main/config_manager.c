@@ -649,6 +649,7 @@ char *config_manager_to_json(const app_config_t *cfg)
         cJSON_AddBoolToObject(c, "net_to_uart", cfg->routing[i].net_to_uart);
         cJSON_AddNumberToObject(c, "telemetry_hold_ms", cfg->routing[i].telemetry_hold_ms);
         cJSON_AddNumberToObject(c, "crsf_dest_addr", cfg->routing[i].crsf_dest_addr);
+        cJSON_AddNumberToObject(c, "crsf_to_uart_max_hz", cfg->routing[i].crsf_to_uart_max_hz);
         cJSON_AddBoolToObject(c, "crsf_test_to_uart", cfg->routing[i].crsf_test_to_uart);
         cJSON_AddBoolToObject(c, "crsf_test_to_net", cfg->routing[i].crsf_test_to_net);
 
@@ -798,6 +799,9 @@ esp_err_t config_manager_from_json(const char *json, app_config_t *out)
                 da == CRSF_ADDR_FLIGHT_CONTROLLER || da == CRSF_ADDR_RECEIVER) {
                 out->routing[id].crsf_dest_addr = (uint8_t)da;
             }
+
+            int hz = json_int(c, "crsf_to_uart_max_hz", out->routing[id].crsf_to_uart_max_hz);
+            if (hz >= 0 && hz <= 1000) out->routing[id].crsf_to_uart_max_hz = (uint16_t)hz;
             out->routing[id].crsf_test_to_uart = json_bool(c, "crsf_test_to_uart", out->routing[id].crsf_test_to_uart);
             out->routing[id].crsf_test_to_net  = json_bool(c, "crsf_test_to_net",  out->routing[id].crsf_test_to_net);
         }
