@@ -72,3 +72,14 @@ bool crsf_txq_has_fresh(const crsf_txq_t *q, uint32_t now_ms)
     }
     return false;
 }
+
+size_t crsf_txq_purge_stale(crsf_txq_t *q, uint32_t now_ms)
+{
+    size_t n = 0;
+    while (q->count && slot_stale(q, q->head, now_ms)) {
+        drop_oldest(q);
+        q->stats.dropped_stale++;
+        n++;
+    }
+    return n;
+}

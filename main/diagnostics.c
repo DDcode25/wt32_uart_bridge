@@ -10,6 +10,7 @@
 #include "transport.h"
 #include "routing_manager.h"
 #include "crsf_singlewire.h"
+#include "crsf_txq.h"
 #include "esp_system.h"
 #include "esp_heap_caps.h"
 #include "esp_timer.h"
@@ -349,15 +350,29 @@ char *diagnostics_status_json(void)
         cJSON_AddBoolToObject(c, "alive", uart_manager_is_channel_alive(i));
         cJSON_AddBoolToObject(c, "dump_enabled", uart_manager_get_dump(i));
 
+        /* Как канал подключён физически. Раньше это приходилось выводить
+         * из дуплекса и протокола, и односторонний приём с S.Port регулярно
+         * принимали за двунаправленный мост по одному проводу. */
+        cJSON_AddNumberToObject(c, "duplex", ucfg.duplex);
+        cJSON_AddBoolToObject(c, "invert_rx", ucfg.invert_rx);
+        cJSON_AddBoolToObject(c, "invert_tx", ucfg.invert_tx);
+        if (ucfg.protocol == PROTO_MODE_CRSF) {
+            cJSON_AddNumberToObject(c, "crsf_mode", ucfg.crsf_mode);
+            cJSON_AddStringToObject(c, "crsf_mode_name",
+                                    uart_manager_crsf_mode_name(ucfg.crsf_mode));
+        }
+
         cJSON_AddNumberToObject(c, "rx_bytes", (double)ust.rx_bytes);
         cJSON_AddNumberToObject(c, "tx_bytes", (double)ust.tx_bytes);
         cJSON_AddNumberToObject(c, "rx_overruns", ust.rx_overruns);
         cJSON_AddNumberToObject(c, "tx_dropped", ust.tx_dropped);
+        cJSON_AddNumberToObject(c, "tx_blocked", ust.tx_blocked);
         cJSON_AddNumberToObject(c, "last_rx_time_ms", ust.last_rx_time_ms);
 
         cJSON_AddNumberToObject(c, "udp_rx_packets", tst.udp_rx_packets);
         cJSON_AddNumberToObject(c, "udp_tx_packets", tst.udp_tx_packets);
         cJSON_AddNumberToObject(c, "udp_rx_dropped", tst.udp_rx_dropped);
+        cJSON_AddNumberToObject(c, "udp_tx_no_destination", tst.udp_tx_no_destination);
         cJSON_AddNumberToObject(c, "tcp_rx_bytes", tst.tcp_rx_bytes);
         cJSON_AddNumberToObject(c, "tcp_tx_bytes", tst.tcp_tx_bytes);
         cJSON_AddNumberToObject(c, "tcp_clients", tst.tcp_clients_connected);
@@ -376,11 +391,36 @@ char *diagnostics_status_json(void)
                               want_udp == transport_udp_is_listening(i) &&
                               want_tcp == transport_tcp_is_listening(i));
 
+        /* Куда канал на самом деле отправляет. Настройка это описывает, но
+         * с оговорками — выключенный адресат, пустой адрес, выученный пир,
+         * которого ещё нет, — и разбираться в них по одной странице
+         * настроек приходилось вручную. Здесь готовый ответ. */
+        cJSON *dst = cJSON_CreateArray();
+        for (int d = 0; d < TRANSPORT_MAX_DESTINATIONS; d++) {
+            const transport_dest_t *dd = &tcfg.udp_destinations[d];
+            if (!dd->enabled || dd->ip == 0 || dd->port == 0) continue;
+            struct in_addr a = { .s_addr = dd->ip };
+            char line[32];
+            snprintf(line, sizeof(line), "%s:%u", inet_ntoa(a), (unsigned)dd->port);
+            cJSON_AddItemToArray(dst, cJSON_CreateString(line));
+        }
+        cJSON_AddItemToObject(c, "udp_destinations_active", dst);
+
+        uint32_t peer_ip; uint16_t peer_port;
+        if (transport_get_learned_peer(i, &peer_ip, &peer_port)) {
+            struct in_addr a = { .s_addr = peer_ip };
+            char line[32];
+            snprintf(line, sizeof(line), "%s:%u", inet_ntoa(a), (unsigned)peer_port);
+            cJSON_AddStringToObject(c, "learned_peer", line);
+        } else {
+            cJSON_AddNullToObject(c, "learned_peer");
+        }
+
         /* Однопроводный CRSF: состояние линии и счётчики физического слоя.
          * Их нет у обычного канала — там приём и передача независимы, и
          * ни коллизий, ни переключений направления не бывает. */
         if (ucfg.protocol == PROTO_MODE_CRSF &&
-            ucfg.duplex == UART_DUPLEX_HALF_SINGLE_WIRE && crsf_singlewire_running()) {
+            ucfg.crsf_mode == CRSF_MODE_SINGLE_WIRE && crsf_singlewire_running()) {
             crsf_sw_stats_t sw;
             crsf_singlewire_get_stats(&sw);
             cJSON *j = cJSON_CreateObject();
@@ -391,16 +431,28 @@ char *diagnostics_status_json(void)
             cJSON_AddNumberToObject(j, "tx_bytes", (double)sw.tx_bytes);
             cJSON_AddNumberToObject(j, "crc_errors", sw.crc_errors);
             cJSON_AddNumberToObject(j, "invalid_frames", sw.invalid_frames);
+            cJSON_AddNumberToObject(j, "sync_errors", sw.sync_errors);
             cJSON_AddNumberToObject(j, "rx_overflow", sw.rx_overflow);
-            cJSON_AddNumberToObject(j, "tx_queue_drops", sw.tx_queue_drops);
-            cJSON_AddNumberToObject(j, "collisions", sw.collisions);
+            /* Причины отказа передачи по отдельности: по ним видно, занята
+             * ли линия, медленнее ли она источника, или из сети приходит
+             * то, что нельзя отдавать в шину. */
+            cJSON_AddNumberToObject(j, "tx_drop_overflow", sw.tx_drop_overflow);
+            cJSON_AddNumberToObject(j, "tx_drop_stale", sw.tx_drop_stale);
+            cJSON_AddNumberToObject(j, "tx_drop_invalid", sw.tx_drop_invalid);
+            cJSON_AddNumberToObject(j, "tx_no_window", sw.tx_no_window);
+            cJSON_AddNumberToObject(j, "tx_uart_errors", sw.tx_uart_errors);
+            cJSON_AddNumberToObject(j, "tx_hold_overruns", sw.tx_hold_overruns);
+            cJSON_AddNumberToObject(j, "echo_suppressed", sw.echo_suppressed);
             cJSON_AddNumberToObject(j, "echo_mismatches", sw.echo_mismatches);
             cJSON_AddNumberToObject(j, "pings_answered", sw.pings_answered);
             cJSON_AddNumberToObject(j, "rx_to_tx_switches", sw.rx_to_tx_switches);
             cJSON_AddNumberToObject(j, "tx_to_rx_switches", sw.tx_to_rx_switches);
             cJSON_AddNumberToObject(j, "last_rx_ms", sw.last_rx_ms);
             cJSON_AddNumberToObject(j, "last_tx_ms", sw.last_tx_ms);
+            cJSON_AddNumberToObject(j, "tx_queue_depth", sw.tx_queue_depth);
             cJSON_AddNumberToObject(j, "tx_queue_depth_max", sw.tx_queue_depth_max);
+            cJSON_AddNumberToObject(j, "tx_queue_capacity", CRSF_TXQ_CAPACITY);
+            cJSON_AddNumberToObject(j, "tx_max_age_ms", CRSF_TXQ_DEFAULT_MAX_AGE_MS);
             cJSON_AddNumberToObject(j, "rx_processing_max_us", sw.rx_processing_max_us);
             cJSON_AddItemToObject(c, "crsf_singlewire", j);
         }
@@ -417,6 +469,11 @@ char *diagnostics_status_json(void)
                     cJSON *nj = crsf_state_to_json(&np->crsf.state);
                     cJSON_AddNumberToObject(nj, "hold_repeats",
                                             routing_manager_get_telem_repeats(i));
+                    /* Байты из сети, не сложившиеся в целый кадр. В провод
+                     * они не пошли — счётчик показывает, что источник за
+                     * сетью режет кадры по датаграммам или теряет их. */
+                    cJSON_AddNumberToObject(nj, "bad_bytes",
+                                            routing_manager_get_net_bad_bytes(i));
                     cJSON_AddItemToObject(c, "crsf_from_net", nj);
                 }
             } else if (ucfg.protocol == PROTO_MODE_SBUS) {

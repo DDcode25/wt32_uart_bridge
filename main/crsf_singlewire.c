@@ -1,9 +1,11 @@
 #include <string.h>
 #include "crsf_singlewire.h"
 #include "protocol_crsf.h"
+#include "crsf_txq.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/queue.h"
+#include "freertos/semphr.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "driver/gpio.h"
@@ -17,16 +19,15 @@ static const char *TAG = "crsf_sw";
 #define EVENT_QUEUE_LEN   20
 #define READ_CHUNK        128
 
-typedef struct {
-    uint8_t  len;
-    uint8_t  data[CRSF_MAX_FRAME_LEN];
-} tx_frame_t;
-
 static struct {
     crsf_sw_cfg_t   cfg;
     crsf_sw_stats_t stats;
     QueueHandle_t   evt_queue;
-    QueueHandle_t   tx_queue;
+    /* Очередь передачи со сроком годности. Штатная очередь FreeRTOS сюда
+     * не годится: она умеет хранить, но не умеет забывать, а на общем
+     * проводе устаревшая команда вреднее потерянной. */
+    crsf_txq_t        txq;
+    SemaphoreHandle_t txq_lock;
     TaskHandle_t    task;
     crsf_parser_t   parser;
     crsf_sw_frame_cb_t cb;
@@ -57,12 +58,27 @@ const char *crsf_singlewire_state_name(crsf_sw_state_t st)
 /* --- направление линии ---
  *
  * В покое вывод отвязан от передатчика и работает входом. Единицу на линии
- * держит подтяжка: внутренней (~45 кОм) на 400000 бод хватает впритык,
- * внешняя 1–4.7 кОм заметно надёжнее.
+ * держит подтяжка: ВНЕШНЯЯ на 1–4.7 кОм к 3.3 В — основной вариант,
+ * внутренняя (~45 кОм) включается ниже как запасной и на 400000 бод
+ * работает впритык. Общий GND между платой и устройством обязателен: без
+ * него уровней просто нет.
  *
  * На время посылки вывод становится выходом с открытым стоком. Открытый
  * сток здесь принципиален: если оба конца заговорят разом, они лишь
- * совместно потянут линию вниз, а не замкнут выходы друг на друга. */
+ * совместно потянут линию вниз, а не замкнут выходы друг на друга.
+ *
+ * ПОРЯДОК ВЫЗОВОВ ЗДЕСЬ ЗНАЧИМ, и переставлять их нельзя.
+ *
+ * gpio_set_direction() с любым режимом, включающим выход, внутри себя
+ * зовёт gpio_output_enable(), а тот перенаправляет выход вывода на
+ * обычный GPIO-регистр (SIG_GPIO_OUT_IDX). То есть он ОТКЛЮЧАЕТ передатчик
+ * UART от вывода. Поэтому сначала задаётся направление, и только потом
+ * выход подключается к сигналу UART TX. Обратный порядок оставляет вывод
+ * под управлением регистра GPIO: посылка уходит в никуда, приёмник на том
+ * конце молчит, а по счётчикам всё выглядит как удачная передача.
+ *
+ * В line_to_rx() порядок обратный по той же причине: сначала отвязываем
+ * сигнал, потом переводим вывод во вход. */
 static void line_to_tx(void)
 {
     gpio_set_direction((gpio_num_t)s.cfg.gpio, GPIO_MODE_INPUT_OUTPUT_OD);
@@ -108,15 +124,24 @@ static void on_frame(uint8_t channel_id, const uint8_t *frame, size_t len, void 
  * стоп-бита, и ждём его опросом регистра, а не сном: пробуждение по
  * системному тику добавляло к посылке до миллисекунды, в течение которой
  * вывод продолжал держать линию, и встречный кадр погибал. */
-static void transmit_frame(const tx_frame_t *f)
+static void transmit_frame(const uint8_t *data, size_t len)
 {
+    /* Расчётное время посылки: 10 бит на байт (старт + 8 данных + стоп).
+     * Нужно, чтобы отличить нормальное ожидание от залипшего. */
+    uint32_t expect_us = (uint32_t)((uint64_t)len * 10 * 1000000 / s.cfg.baud);
+    int64_t  t_start   = esp_timer_get_time();
+
     line_to_tx();
 
-    int written = uart_write_bytes(s.cfg.port, (const char *)f->data, f->len);
+    int written = uart_write_bytes(s.cfg.port, (const char *)data, len);
+    if (written != (int)len) s.stats.tx_uart_errors++;
 
     s.stats.state = CRSF_SW_RETURN_TO_RX;
     uart_wait_tx_idle_polling(s.cfg.port);
     line_to_rx();
+
+    uint32_t held_us = (uint32_t)(esp_timer_get_time() - t_start);
+    if (held_us > expect_us + CRSF_SW_TX_DONE_SLACK_US) s.stats.tx_hold_overruns++;
 
     /* Собственное эхо забираем ПО СОДЕРЖИМОМУ, а не сбросом входа.
      *
@@ -129,15 +154,15 @@ static void transmit_frame(const tx_frame_t *f)
      * в секунду при двадцати посылках. Сверка по содержимому теряет только
      * то, что действительно наше; всё, что разошлось, идёт в разбор. */
     uint8_t echo[CRSF_MAX_FRAME_LEN];
-    int got = uart_read_bytes(s.cfg.port, echo, f->len, 0);
+    int got = uart_read_bytes(s.cfg.port, echo, len, 0);
     int k = 0;
     if (got > 0) {
-        while (k < got && k < f->len && echo[k] == f->data[k]) k++;
+        while (k < got && k < (int)len && echo[k] == data[k]) k++;
         if (k < got) {
             /* Разошлось — дальше уже не наше, отдаём разбору как есть. */
             s.stats.echo_mismatches++;
             crsf_parser_feed(&s.parser, 0, &echo[k], (size_t)(got - k), on_frame, NULL);
-            k = f->len;   /* остаток эха потерян вместе с совпадением */
+            k = (int)len;   /* остаток эха потерян вместе с совпадением */
         }
     }
 
@@ -146,12 +171,13 @@ static void transmit_frame(const tx_frame_t *f)
      * запоминаем и снимаем в следующих чтениях — иначе оно уходит в разбор
      * как мусор: на стенде это давало полторы сотни ошибок длины в секунду
      * и «приём» размером в половину собственной передачи. */
-    if (k < f->len) {
-        s.echo_tail_len = (uint8_t)(f->len - k);
+    if (k < (int)len) {
+        s.echo_tail_len = (uint8_t)((int)len - k);
         s.echo_tail_pos = 0;
-        memcpy(s.echo_tail, &f->data[k], s.echo_tail_len);
+        memcpy(s.echo_tail, &data[k], s.echo_tail_len);
     } else {
         s.echo_tail_len = s.echo_tail_pos = 0;
+        s.stats.echo_suppressed++;
     }
 
     if (written > 0) {
@@ -161,38 +187,63 @@ static void transmit_frame(const tx_frame_t *f)
     }
 }
 
-/* Отдать накопленное, пока линия свободна. Вызывается сразу после конца
- * принятого кадра — то есть в начале межкадрового промежутка.
+/* Отдать ОДИН кадр, если для него есть окно.
  *
- * Отдаём НЕ один кадр за вызов. Когда встречная сторона говорит непрерывно,
- * поводов для передачи и так 250 в секунду, но когда она молчит, поводом
- * остаётся только таймаут ожидания события — и один кадр за таймаут
- * означает ровно столько посылок в секунду, сколько таймаутов. На стенде
- * это и вышло: дальняя плата принимала из сети 249.8 кадра в секунду, а в
- * провод отдавала 22.6. Поэтому опустошаем очередь, проверяя тишину перед
- * каждой посылкой. */
+ * Вызывается сразу после конца принятого кадра — то есть в начале
+ * межкадрового промежутка, — и по таймауту простоя, если встречная сторона
+ * молчит и синхронизировать не с чем.
+ *
+ * Ровно один кадр за вызов, а не «сколько влезет». Залпом очередь
+ * опустошать нельзя: отданные подряд кадры занимают линию сплошняком, а
+ * встречная сторона отвечает именно в промежутки. Темп при этом не
+ * страдает — поводов для вызова 250 в секунду при живом потоке и 500 при
+ * молчащей линии, чего с запасом хватает на любую телеметрию.
+ *
+ * Каждая причина отказа считается отдельно: по этим счётчикам и видно,
+ * занята ли линия, медленнее ли она источника, или настройка неверна. */
 static void service_tx(void)
 {
-    while (uxQueueMessagesWaiting(s.tx_queue)) {
-        /* Ровный такт вместо залпа: между своими посылками выдерживаем
-         * паузу, чтобы встречной стороне было куда ответить. */
-        int64_t now_us = esp_timer_get_time();
-        if (s.last_tx_us && (now_us - s.last_tx_us) < CRSF_SW_TX_MIN_GAP_US) return;
+    uint32_t now = now_ms();
 
-        /* Линия должна быть тихой. Если в буфере уже что-то есть, значит
-         * встречная сторона заговорила — это коллизия, и лучше промолчать:
-         * наш кадр всё равно погиб бы, забрав с собой чужой. */
-        size_t pending = 0;
-        if (uart_get_buffered_data_len(s.cfg.port, &pending) == ESP_OK && pending > 0) {
-            s.stats.collisions++;
-            return;
-        }
+    /* Протухшее выбрасываем ДО всех проверок. Иначе при плотном встречном
+     * потоке очередь стояла бы полной, глубина врала бы, а счётчик
+     * устаревших кадров молчал бы ровно тогда, когда он нужен. */
+    xSemaphoreTake(s.txq_lock, portMAX_DELAY);
+    crsf_txq_purge_stale(&s.txq, now);
+    bool have = crsf_txq_has_fresh(&s.txq, now);
+    s.stats.tx_drop_stale     = s.txq.stats.dropped_stale;
+    s.stats.tx_drop_overflow  = s.txq.stats.dropped_overflow;
+    s.stats.tx_drop_invalid   = s.txq.stats.dropped_invalid;
+    s.stats.tx_queue_depth    = (uint16_t)crsf_txq_depth(&s.txq);
+    s.stats.tx_queue_depth_max = s.txq.stats.depth_max;
+    xSemaphoreGive(s.txq_lock);
 
-        tx_frame_t f;
-        if (xQueueReceive(s.tx_queue, &f, 0) != pdTRUE) return;
-        transmit_frame(&f);
-        s.last_tx_us = esp_timer_get_time();
+    if (!have) return;
+
+    /* Ровный такт вместо залпа: между своими посылками выдерживаем паузу,
+     * чтобы встречной стороне было куда ответить. */
+    int64_t now_us = esp_timer_get_time();
+    if (s.last_tx_us && (now_us - s.last_tx_us) < CRSF_SW_TX_MIN_GAP_US) return;
+
+    /* Линия должна быть тихой. Если в буфере уже что-то есть, значит
+     * встречная сторона заговорила — лучше промолчать: наш кадр всё равно
+     * погиб бы, забрав с собой чужой. Кадр остаётся в очереди и уйдёт в
+     * следующее окно, если не успеет устареть. */
+    size_t pending = 0;
+    if (uart_get_buffered_data_len(s.cfg.port, &pending) == ESP_OK && pending > 0) {
+        s.stats.tx_no_window++;
+        return;
     }
+
+    uint8_t frame[CRSF_MAX_FRAME_LEN];
+    size_t  flen = 0;
+    xSemaphoreTake(s.txq_lock, portMAX_DELAY);
+    crsf_txq_res_t res = crsf_txq_pop(&s.txq, now, frame, &flen);
+    xSemaphoreGive(s.txq_lock);
+    if (res != CRSF_TXQ_OK) return;
+
+    transmit_frame(frame, flen);
+    s.last_tx_us = esp_timer_get_time();
 }
 
 static void crsf_sw_task(void *arg)
@@ -255,6 +306,7 @@ static void crsf_sw_task(void *arg)
 
                 s.stats.crc_errors     = s.parser.state.crc_errors;
                 s.stats.invalid_frames = s.parser.state.short_or_long_frame_errors;
+                s.stats.sync_errors    = s.parser.state.sync_errors;
                 s.stats.state = CRSF_SW_RX_LISTEN;
 
                 uint32_t dt = (uint32_t)esp_timer_get_time() - t0;
@@ -343,11 +395,23 @@ esp_err_t crsf_singlewire_start(const crsf_sw_cfg_t *cfg, crsf_sw_frame_cb_t cb,
      * 15.5 в секунду, то есть приёму он не вредит, а промежуток даёт. */
     uart_set_rx_timeout(cfg->port, CRSF_SW_RX_TIMEOUT_SYMBOLS);
 
+    /* Внутренняя подтяжка как ЗАПАСНОЙ вариант.
+     *
+     * Единицу на общем проводе должен держать внешний резистор 1–4.7 кОм
+     * к 3.3 В — на 400000 бод фронта от него хватает с запасом. Внутренняя
+     * подтяжка ESP32 около 45 кОм, и с ёмкостью проводки она даёт фронт на
+     * грани; включаем её здесь, чтобы линия не висела в воздухе, если
+     * внешней не поставили, но полагаться на неё не следует.
+     *
+     * Ставится ПОСЛЕ uart_set_pin() и line_to_rx(): оба трогают настройки
+     * вывода и сбросили бы её. */
     line_to_rx();
+    gpio_set_pull_mode((gpio_num_t)cfg->gpio, GPIO_PULLUP_ONLY);
     s.stats.tx_to_rx_switches = 0;   /* стартовое переключение не считаем */
 
-    s.tx_queue = xQueueCreate(CRSF_SW_TX_QUEUE_FRAMES, sizeof(tx_frame_t));
-    if (!s.tx_queue) {
+    crsf_txq_init(&s.txq, CRSF_TXQ_DEFAULT_MAX_AGE_MS);
+    s.txq_lock = xSemaphoreCreateMutex();
+    if (!s.txq_lock) {
         uart_driver_delete(cfg->port);
         return ESP_ERR_NO_MEM;
     }
@@ -358,8 +422,8 @@ esp_err_t crsf_singlewire_start(const crsf_sw_cfg_t *cfg, crsf_sw_frame_cb_t cb,
      * миллисекунд, и опоздать в него из-за чужой задачи нельзя. */
     if (xTaskCreatePinnedToCore(crsf_sw_task, "crsf_sw", 4096, NULL, 14,
                                 &s.task, tskNO_AFFINITY) != pdPASS) {
-        vQueueDelete(s.tx_queue);
-        s.tx_queue = NULL;
+        vSemaphoreDelete(s.txq_lock);
+        s.txq_lock = NULL;
         uart_driver_delete(cfg->port);
         s.running = false;
         return ESP_FAIL;
@@ -379,7 +443,7 @@ esp_err_t crsf_singlewire_stop(void)
     if (!s.running) return ESP_OK;
     s.should_exit = true;
     for (int i = 0; i < 50 && s.running; i++) vTaskDelay(pdMS_TO_TICKS(10));
-    if (s.tx_queue) { vQueueDelete(s.tx_queue); s.tx_queue = NULL; }
+    if (s.txq_lock) { vSemaphoreDelete(s.txq_lock); s.txq_lock = NULL; }
     uart_driver_delete(s.cfg.port);
     s.task = NULL;
     return ESP_OK;
@@ -389,39 +453,45 @@ bool crsf_singlewire_running(void) { return s.running; }
 
 esp_err_t crsf_singlewire_send_frame(const uint8_t *frame, size_t len)
 {
-    if (!s.running || !s.tx_queue) return ESP_ERR_INVALID_STATE;
+    if (!s.running || !s.txq_lock) return ESP_ERR_INVALID_STATE;
     if (!frame || len == 0 || len > CRSF_MAX_FRAME_LEN) return ESP_ERR_INVALID_SIZE;
 
-    if (!s.cfg.raw) {
-        /* В линию не должно уходить то, что мы сами испортили: длина обязана
-         * сойтись с заявленной, а CRC — с содержимым. */
-        if (len < 4) return ESP_ERR_INVALID_SIZE;
-        uint8_t declared = frame[1];
-        if ((size_t)declared + 2 != len) return ESP_ERR_INVALID_ARG;
-        if (crsf_crc8_dvb_s2(&frame[2], (size_t)declared - 1) != frame[len - 1]) {
-            return ESP_ERR_INVALID_CRC;
+    /* Здесь только постановка в очередь. Писать в провод из чужой задачи
+     * нельзя: владелец линии один, и момент посылки выбирает он. */
+    if (s.cfg.raw) {
+        /* Прозрачный режим: проверок нет, но очередь их делает, поэтому в
+         * ней такому кадру места нет. Отдаём как есть, минуя проверку —
+         * ровно это и означает прозрачность. */
+        xSemaphoreTake(s.txq_lock, portMAX_DELAY);
+        crsf_txq_t *q = &s.txq;
+        if (q->count == CRSF_TXQ_CAPACITY) {
+            q->head = (uint8_t)((q->head + 1) % CRSF_TXQ_CAPACITY);
+            q->count--;
+            q->stats.dropped_overflow++;
         }
+        uint8_t tail = (uint8_t)((q->head + q->count) % CRSF_TXQ_CAPACITY);
+        memcpy(q->slot[tail].data, frame, len);
+        q->slot[tail].len = (uint8_t)len;
+        q->slot[tail].queued_ms = now_ms();
+        q->count++;
+        q->stats.queued++;
+        if (q->count > q->stats.depth_max) q->stats.depth_max = q->count;
+        xSemaphoreGive(s.txq_lock);
+        return ESP_OK;
     }
 
-    tx_frame_t f;
-    f.len = (uint8_t)len;
-    memcpy(f.data, frame, len);
+    xSemaphoreTake(s.txq_lock, portMAX_DELAY);
+    crsf_txq_res_t res = crsf_txq_push(&s.txq, frame, len, now_ms());
+    s.stats.tx_drop_overflow = s.txq.stats.dropped_overflow;
+    s.stats.tx_drop_invalid  = s.txq.stats.dropped_invalid;
+    s.stats.tx_queue_depth   = (uint16_t)crsf_txq_depth(&s.txq);
+    s.stats.tx_queue_depth_max = s.txq.stats.depth_max;
+    xSemaphoreGive(s.txq_lock);
 
-    if (xQueueSend(s.tx_queue, &f, 0) != pdTRUE) {
-        /* Очередь полна: выбрасываем САМЫЙ СТАРЫЙ кадр и ставим свежий.
-         * Для управления устаревшее состояние вреднее потери: пульт уже
-         * прислал следующее, и отдавать в линию прошлое незачем. */
-        tx_frame_t stale;
-        if (xQueueReceive(s.tx_queue, &stale, 0) == pdTRUE) s.stats.tx_queue_drops++;
-        if (xQueueSend(s.tx_queue, &f, 0) != pdTRUE) {
-            s.stats.tx_queue_drops++;
-            return ESP_FAIL;
-        }
+    switch (res) {
+        case CRSF_TXQ_INVALID: return ESP_ERR_INVALID_CRC;
+        default:               return ESP_OK;   /* OK и OVERFLOW: кадр принят */
     }
-
-    UBaseType_t depth = uxQueueMessagesWaiting(s.tx_queue);
-    if (depth > s.stats.tx_queue_depth_max) s.stats.tx_queue_depth_max = (uint16_t)depth;
-    return ESP_OK;
 }
 
 void crsf_singlewire_get_stats(crsf_sw_stats_t *out)
