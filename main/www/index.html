@@ -300,6 +300,11 @@ const NETMODES=["Вимкнено","UDP","TCP server","TCP client","UDP + TCP se
 /* Однопроводный режим: вместо двух полей GPIO показываем одно. Два поля
    для одной физической линии — приглашение задать их разными и потом
    искать, почему канал молчит. */
+/* Режим CRSF задаёт физику линии, а дуплекс лишь следует за ним.
+   Держать их независимыми было ошибкой: односторонний приём с S.Port и
+   общий двунаправленный провод — разные схемы подключения, и настройка,
+   позволявшая описать одну параметрами другой, регулярно приводила к
+   попыткам писать в пульт. */
 function syncOneWire(id){
   /* Свой getElementById, а не помощник g(): тот объявлен ЛОКАЛЬНО внутри
      collect(), и обращение к нему отсюда роняло отрисовку форм целиком —
@@ -307,12 +312,36 @@ function syncOneWire(id){
   const el=i=>document.getElementById(i);
   const dup=el('c'+id+'_dup'), rxrow=el('c'+id+'_rxrow'), txlbl=el('c'+id+'_txlbl');
   if(!dup||!rxrow||!txlbl)return;
+
+  const cm=el('c'+id+'_cmode'), cmrow=el('c'+id+'_cmrow'), cmhint=el('c'+id+'_cmhint');
+  const chan=cfg&&cfg.channels?cfg.channels.find(x=>x.channel_id==id):null;
+  const isCrsf=chan&&chan.protocol===1;
+  if(cmrow)cmrow.style.display=isCrsf?'':'none';
+
+  /* Для CRSF режим — источник истины: он выставляет дуплекс сам, и менять
+     дуплекс руками нельзя, иначе прошивка отклонит конфигурацию. */
+  if(isCrsf&&cm){
+    dup.value=(+cm.value===1)?1:0;
+    dup.disabled=true;
+    if(cmhint)cmhint.innerHTML=(+cm.value===1)
+      ?'Спільний двонапрямний провід: RX і TX — ОДИН GPIO, дуплекс half. '+
+       'Потрібна підтяжка до 3.3 В (зовнішня 1–4.7 кОм) і спільний GND. '+
+       'Для прямого CRSF TTL інверсія вимкнена; вмикайте лише за зовнішнього інвертора.'
+      :'Пульт віддає CRSF по S.Port, плата лише слухає. TX GPIO НЕ під’єднується, '+
+       'у дріт не пишеться нічого. Типово: RX GPIO33, 400000 бод, 8N1, інверсія RX увімкнена. '+
+       'Це НЕ двонапрямний CRSF по одному дроту.';
+  }else{
+    dup.disabled=false;
+    if(cmhint)cmhint.textContent='';
+  }
+
   const one=(+dup.value===1);
   rxrow.style.display=one?'none':'';
   txlbl.textContent=one?'CRSF GPIO (один провід)':'TX GPIO';
   if(one){const rx=el('c'+id+'_rx'),tx=el('c'+id+'_tx');if(rx&&tx)rx.value=tx.value;}
 }
 const PARITY=["None","Even","Odd"];const STOP=["1","1.5","2"];const DUPLEX=["Full duplex","Half / single-wire","RS-485 half-duplex"];
+const CRSFMODES=["RX-only TX16S S.Port","Single-wire CRSF"];
 let cfg=null;
 
 function toast(m,bad){const t=document.getElementById('toast');t.textContent=m;t.style.borderColor=bad?'var(--err)':'var(--ok)';t.style.display='block';setTimeout(()=>t.style.display='none',2600);}
@@ -405,6 +434,8 @@ function uartForm(c){
   <div class="row"><label>Інверсія RX</label><input type="checkbox" id="c${id}_irx" ${c.invert_rx?'checked':''}></div>
   <div class="row"><label>Інверсія TX</label><input type="checkbox" id="c${id}_itx" ${c.invert_tx?'checked':''}></div>
   <div class="row"><span class="hint">S.Bus зазвичай потребує інверсії: 100000 бод, 8E2, інверсія RX і TX.</span></div>
+  <div class="row" id="c${id}_cmrow"><label>Режим CRSF</label><select id="c${id}_cmode" onchange="syncOneWire(${id})">${opts(CRSFMODES,c.crsf_mode||0)}</select></div>
+  <div class="row"><span class="hint" id="c${id}_cmhint"></span></div>
   <div class="row"><label>Дуплекс</label><select id="c${id}_dup" onchange="syncOneWire(${id})">${opts(DUPLEX,c.duplex)}</select></div>
   <div class="row"><label>RS-485 DE GPIO</label><input type="number" id="c${id}_de" value="${c.rs485_de_gpio}" min="-1" max="33"></div>
   <div class="row"><label>RS-485 /RE GPIO</label><input type="number" id="c${id}_re" value="${c.rs485_re_gpio}" min="-1" max="33"></div>
@@ -428,6 +459,12 @@ function uartForm(c){
   </div>`;
 }
 
+function onProtoChange(id,proto){
+  const c=cfg.channels.find(x=>x.channel_id==id);
+  if(c)c.protocol=proto;
+  syncOneWire(id);
+}
+
 function render(){
   [0,1,2].forEach(i=>{
     const c=cfg.channels.find(x=>x.channel_id==i);
@@ -445,8 +482,12 @@ function render(){
   document.getElementById('d_verbose').checked=cfg.verbose_log;
   document.getElementById('w_auth').checked=cfg.web_auth_enabled;
 
+  /* Смена протокола обязана сразу отражаться на странице порта: режим
+     CRSF там показывается только для CRSF, и без этого обработчика он
+     появлялся лишь после сохранения и перезагрузки страницы. */
   document.getElementById('protoforms').innerHTML=cfg.channels.map(c=>
-    `<div class="row"><label>${c.name}</label><select id="c${c.channel_id}_proto">${opts(PROTOS,c.protocol)}</select></div>`).join('');
+    `<div class="row"><label>${c.name}</label><select id="c${c.channel_id}_proto"
+       onchange="onProtoChange(${c.channel_id},+this.value)">${opts(PROTOS,c.protocol)}</select></div>`).join('');
   document.getElementById('routeforms').innerHTML=cfg.channels.map(c=>
     `<div class="row"><label>${c.name}</label>
      <label style="flex:0 0 auto"><input type="checkbox" id="c${c.channel_id}_u2n" ${c.uart_to_net?'checked':''}> UART→мережа</label>
@@ -484,9 +525,6 @@ function collect(){
     c.data_bits=+g('c'+i+'_db').value; c.parity=+g('c'+i+'_par').value; c.stop_bits=+g('c'+i+'_sb').value;
     c.invert_rx=g('c'+i+'_irx').checked; c.invert_tx=g('c'+i+'_itx').checked;
     c.duplex=+g('c'+i+'_dup').value;
-    /* Один провод — один вывод: RX повторяет TX, чтобы в конфиг не попали
-       два разных пина для физически одной линии. */
-    if(c.duplex===1){c.rx_gpio=c.tx_gpio;}
     c.rs485_de_gpio=+g('c'+i+'_de').value; c.rs485_re_gpio=+g('c'+i+'_re').value;
     c.rx_watchdog_timeout_ms=+g('c'+i+'_wd').value;
     c.net_mode=+g('c'+i+'_mode').value;
@@ -494,6 +532,22 @@ function collect(){
     c.max_tcp_clients=+g('c'+i+'_mtc').value; c.allow_any_source=g('c'+i+'_any').checked;
     c.udp_destinations.forEach((d,k)=>{d.ip=g('c'+i+'_d'+k+'_ip').value;d.port=+g('c'+i+'_d'+k+'_p').value;d.enabled=g('c'+i+'_d'+k+'_e').checked;});
     if(g('c'+i+'_proto'))c.protocol=+g('c'+i+'_proto').value;
+    /* Приведение режима CRSF к физике — ПОСЛЕ чтения протокола, иначе
+       непонятно, к чему приводить. Прошивка эти же правила проверяет
+       заново и отказывает при расхождении, так что расходиться им негде. */
+    if(g('c'+i+'_cmode'))c.crsf_mode=+g('c'+i+'_cmode').value;
+    if(c.protocol===1){
+      if(c.crsf_mode===1){
+        c.duplex=1;
+        /* Один провод — один вывод и одна инверсия. */
+        c.rx_gpio=c.tx_gpio;
+        c.invert_tx=c.invert_rx;
+      }else{
+        c.duplex=0;
+      }
+    }else if(c.duplex===1){
+      c.rx_gpio=c.tx_gpio;
+    }
     if(g('c'+i+'_u2n')){c.uart_to_net=g('c'+i+'_u2n').checked;c.net_to_uart=g('c'+i+'_n2u').checked;}
     if(g('c'+i+'_tnet')){c.crsf_test_to_net=g('c'+i+'_tnet').checked;c.crsf_test_to_uart=g('c'+i+'_tuart').checked;}
     // Нуль вимикає утримання, тому знята галочка і є вимкненням: саме
@@ -692,13 +746,39 @@ async function poll(){
         if(!n.rx_frames_total)r+=row('','<span class="mut">кадрів із мережі ще не було</span>');
         return r;
       }
+      /* Как канал подключён — первым делом. Именно это чаще всего и
+         оказывалось не тем, чем его считали. */
+      const wiring=()=>{
+        let w='';
+        if(c.crsf_mode_name)w+=row('Режим CRSF',
+          c.crsf_mode===1?`<span class="ok">${c.crsf_mode_name}</span>`
+                         :`${c.crsf_mode_name} <span class="mut">(лише UART → мережа)</span>`);
+        w+=row('Дріт',(c.crsf_mode===1
+              ?`один GPIO${c.rx_gpio}`
+              :`RX GPIO${c.rx_gpio} / TX GPIO${c.tx_gpio}`)+
+            `, ${num(c.baud_rate)} бод, ${DUPLEX[c.duplex]||'?'}`);
+        w+=row('Інверсія',c.crsf_mode===1
+              ?(c.invert_rx?'лінія інвертована':'вимкнена (прямий TTL)')
+              :`RX ${c.invert_rx?'увімкнена':'вимкнена'} / TX ${c.invert_tx?'увімкнена':'вимкнена'}`);
+        return w;
+      };
       let t=`<div class="card" style="background:#0d1015"><h2>${c.name}</h2><table>`+
-        row('Протокол',PROTOS[c.protocol])+row('RX / TX байт',c.rx_bytes+' / '+c.tx_bytes)+
+        row('Протокол',PROTOS[c.protocol])+wiring()+
+        row('RX / TX байт',c.rx_bytes+' / '+c.tx_bytes)+
         row('UART overruns',c.rx_overruns>0?`<span class="err">${c.rx_overruns}</span>`:'0')+
         row('Відкинуто на передачу',c.tx_dropped>0?`<span class="err">${num(c.tx_dropped)} Б — дріт повільніший за джерело</span>`:'0')+
+        (c.tx_blocked?row('Заблоковано передач',
+          `<span class="warn">${num(c.tx_blocked)} — режим лише на приймання, у пульт не пишемо</span>`):'')+
         row('UDP пакетів rx/tx',c.udp_rx_packets+' / '+c.udp_tx_packets)+
         row('UDP слухач',c.udp_listening?'<span class="ok">піднято</span>':
             (c.net_ok===false?'<span class="err">не піднято — порт зайнятий</span>':'<span class="mut">не використовується</span>'))+
+        row('Адресати UDP',(c.udp_destinations_active&&c.udp_destinations_active.length)
+            ?c.udp_destinations_active.join(', ')
+            :'<span class="mut">явних немає</span>')+
+        row('Вивчений пір',c.learned_peer?c.learned_peer:'<span class="mut">ще не було вхідних пакетів</span>')+
+        (c.udp_tx_no_destination?row('Нікуди відправляти',
+          `<span class="err">${num(c.udp_tx_no_destination)}</span> — задайте адресата: приймач, що лише слухає, `+
+          'сам нічого не надсилає, і вивчити його нізвідки'):'')+
         row('UDP відкинуто',c.udp_rx_dropped)+
         row('TCP байт rx/tx',c.tcp_rx_bytes+' / '+c.tcp_tx_bytes)+
         row('TCP клієнтів',c.tcp_clients)+
@@ -710,7 +790,40 @@ async function poll(){
         row('Failsafe',c.crsf.failsafe?'<span class="err">ТАК</span>':'ні')+
         row('Uplink LQ / RSSI / SNR',c.crsf.uplink_lq+' / '+c.crsf.uplink_rssi+' / '+c.crsf.uplink_snr)+
         row('Типи кадрів',crsfTypes(c.crsf));}
-      if(c.crsf_from_net)t+=crsfTele(c.crsf_from_net);
+      if(c.crsf_singlewire){
+        const w=c.crsf_singlewire;
+        const bad=(v,txt)=>v>0?`<span class="err">${num(v)}</span>${txt||''}`:'0';
+        t+=row('<b>Спільний провід</b>','стан: '+w.state)+
+           row('Кадрів провід rx/tx',num(w.rx_frames)+' / '+num(w.tx_frames))+
+           row('Байт провід rx/tx',num(w.rx_bytes)+' / '+num(w.tx_bytes))+
+           row('Помилок CRC',bad(w.crc_errors))+
+           row('Некоректна довжина',bad(w.invalid_frames))+
+           row('Помилок синхронізації',num(w.sync_errors))+
+           row('Переповнень приймача',bad(w.rx_overflow))+
+           /* Черга: скільки зараз, скільки було найбільше і з якої причини
+              кадри не пішли в дріт. Причини роздільні — лікуються вони
+              по-різному. */
+           row('Черга на передачу',`${w.tx_queue_depth} / макс ${w.tx_queue_depth_max} `+
+               `<span class="mut">(ємність ${w.tx_queue_capacity}, придатність ${w.tx_max_age_ms} мс)</span>`)+
+           row('Відкинуто: застаріло',w.tx_drop_stale>0?
+               `<span class="warn">${num(w.tx_drop_stale)}</span> <span class="mut">— лінія зайнята зустрічним потоком</span>`:'0')+
+           row('Відкинуто: переповнення',w.tx_drop_overflow>0?
+               `<span class="warn">${num(w.tx_drop_overflow)}</span> <span class="mut">— дріт повільніший за джерело</span>`:'0')+
+           row('Відкинуто: не пройшло перевірку',bad(w.tx_drop_invalid))+
+           row('Немає вікна для передачі',num(w.tx_no_window))+
+           row('Помилок передачі UART',bad(w.tx_uart_errors))+
+           row('Лінію утримано понад норму',bad(w.tx_hold_overruns))+
+           row('Ехо знято / спотворено',num(w.echo_suppressed)+' / '+
+               (w.echo_mismatches>0?`<span class="warn">${num(w.echo_mismatches)}</span>`:'0'))+
+           row('Відповідей на опит пристроїв',num(w.pings_answered))+
+           row('Розворотів лінії rx→tx / tx→rx',num(w.rx_to_tx_switches)+' / '+num(w.tx_to_rx_switches))+
+           row('Найдовший розбір пачки',w.rx_processing_max_us+' мкс');
+      }
+      if(c.crsf_from_net){
+        t+=crsfTele(c.crsf_from_net);
+        if(c.crsf_from_net.bad_bytes>0)t+=row('Брак із мережі',
+          `<span class="warn">${num(c.crsf_from_net.bad_bytes)} Б</span> <span class="mut">— не склалося в цілий кадр, у дріт не пішло</span>`);
+      }
       if(c.sbus){t+=row('S.Bus кадрів',c.sbus.rx_frames_total)+row('Помилок кадру',c.sbus.frame_errors)+
         row('Failsafe',c.sbus.failsafe?'<span class="err">ТАК</span>':'ні')+
         row('Frame lost',c.sbus.frame_lost?'<span class="warn">ТАК</span>':'ні')+
