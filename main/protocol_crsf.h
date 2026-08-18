@@ -158,6 +158,25 @@ void crsf_parser_feed(crsf_parser_t *p, uint8_t channel_id, const uint8_t *data,
 
 uint8_t crsf_crc8_dvb_s2(const uint8_t *data, size_t len);
 
+/* --- Работа с ГОТОВЫМ кадром (направление сеть -> провод) ---
+ *
+ * Потоковый разбор выше рассчитан на байтовый поток с провода. Из сети
+ * приходит другое: датаграмма, в которой лежит ноль, один или несколько
+ * целых кадров подряд. Разбирать её тем же парсером нельзя — он держит
+ * состояние между вызовами, а тут каждая датаграмма самостоятельна. */
+
+/* Проверяет адрес, длину и CRC целого кадра. Возвращает len, если кадр
+ * корректен, иначе 0. */
+size_t crsf_frame_check(const uint8_t *frame, size_t len);
+
+typedef void (*crsf_frame_iter_cb_t)(const uint8_t *frame, size_t len, void *ctx);
+
+/* Разбирает кусок из сети на целые кадры и зовёт cb на каждый.
+ * Неполный или битый хвост в провод НЕ отдаётся, его размер возвращается
+ * через bad_bytes (может быть NULL). Возвращает число целых кадров. */
+size_t crsf_split_frames(const uint8_t *data, size_t len, size_t *bad_bytes,
+                         crsf_frame_iter_cb_t cb, void *ctx);
+
 /* Собрать RC_CHANNELS_PACKED кадр (для генерации/тестового режима) */
 size_t crsf_build_channels_frame(const uint16_t channels[CRSF_NUM_CHANNELS], uint8_t *out_buf, size_t out_buf_size);
 

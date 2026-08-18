@@ -6,33 +6,27 @@
  * несколько адресов безопасно — проверка целостности не меняется. */
 static bool crsf_addr_known(uint8_t b)
 {
-    /* ВНИМАНИЕ: список намеренно узкий, и расширять его по таблице адресов
-     * из спецификации НЕЛЬЗЯ. Это проверено на живом канале.
+    /* Список destination-адресов, которые реально бывают началом кадра на
+     * линии «пульт — модуль — приёмник — полётный контроллер», плюс
+     * broadcast.
      *
-     * В спецификации TBS больше двадцати адресов (0x0E, 0x10, 0x12..0x14,
-     * 0x80, 0x8A, 0xB0, 0xB2, 0xC0..0xCE, 0xEA..0xEE, 0xF0, 0xF2, ESC
-     * 0x90..0x97). Но эта таблица описывает адресацию устройств, а не
-     * признак начала кадра. Поток байтовый, и синхронизация здесь
-     * держится ровно на том, что стартовый байт редко встречается внутри
-     * данных. Упакованные каналы RC — это почти случайные байты, которые
-     * регулярно совпадают с любым из тех двух десятков значений.
+     * Раньше broadcast 0x00 здесь отсутствовал, и не по прихоти: нулевые
+     * байты в упакованных каналах встречаются постоянно, а прежний разбор
+     * на ЛЮБОМ несовпадении CRC выбрасывал накопленное целиком. Ложное
+     * начало съедало вместе с собой настоящий кадр, шедший следом, — на
+     * стенде это давало 253 кадра/с против 45 и 2887 ошибок CRC за 15
+     * секунд.
      *
-     * Попытка принимать весь список привела к следующему: 253 кадра/с
-     * упали до 45, длина «кадра» выросла с 27 байт до 144, ошибки CRC
-     * подскочили с единиц до 2887 за 15 секунд, а sync_errors — до 27 на
-     * кадр. Парсер цеплялся за ложные начала и съедал настоящие кадры.
-     *
-     * Поэтому принимаются только те адреса, что реально бывают источником
-     * кадра на линии «пульт — модуль — приёмник — полётный контроллер».
-     * Кадр всё равно подтверждается CRC, так что узкий список ничего не
-     * теряет, кроме экзотики, которой на этой линии нет.
-     *
-     * CRSF_ADDR_BROADCAST (0x00) не принимается по той же причине:
-     * нулевые байты в потоке встречаются постоянно. */
+     * Причиной был не список адресов, а способ ресинхронизации. Теперь
+     * несовпадение CRC откатывает разбор на ОДИН байт вперёд от ложного
+     * начала (см. parser_scan), а не сбрасывает буфер, поэтому настоящий
+     * кадр внутри мусора больше не теряется и broadcast принимать
+     * безопасно. */
     return b == CRSF_ADDR_FLIGHT_CONTROLLER ||
            b == CRSF_ADDR_CRSF_TRANSMITTER  ||
            b == CRSF_ADDR_RADIO_TRANSMITTER ||
-           b == CRSF_ADDR_RECEIVER;
+           b == CRSF_ADDR_RECEIVER          ||
+           b == CRSF_ADDR_BROADCAST;
 }
 
 /* CRC8 DVB-S2 (полином 0xD5) таблицей.
@@ -250,49 +244,134 @@ static bool process_frame(crsf_parser_t *p, const uint8_t *frame, size_t frame_l
  * управления однажды вернулся в пульт.
  *
  * Неизвестные и extended-типы кадров проходят наравне с известными: условие
- * пропуска — корректные адрес, длина и CRC, а не наличие декодера. */
+ * пропуска — корректные адрес, длина и CRC, а не наличие декодера.
+ */
+
+/* Разобрать всё, что уже лежит в буфере, и сдвинуть неразобранный хвост.
+ *
+ * Ключевое отличие от прежней схемы — поведение при НЕСОВПАДЕНИИ. Раньше
+ * ошибка CRC или длины сбрасывала буфер целиком: вместе с ложным началом
+ * терялся настоящий кадр, начавшийся следом. Теперь разбор откатывается на
+ * один байт вперёд от ложного начала и ищет заново с него — это и есть
+ * ресинхронизация после мусора. Побочный выигрыш: список стартовых адресов
+ * больше не обязан быть узким, потому что цена ложного срабатывания упала
+ * с «потерянный кадр» до «один лишний байт поиска».
+ *
+ * Прогресс гарантирован: буфер размером ровно в максимальный кадр, поэтому
+ * при полном буфере условие «не хватает данных» невыполнимо и каждый проход
+ * либо забирает кадр, либо сдвигается на байт. */
+static void parser_scan(crsf_parser_t *p, uint8_t channel_id,
+                        protocol_passthrough_cb_t frame_cb, void *cb_ctx)
+{
+    size_t pos = 0;   /* начало кандидата в буфере */
+
+    while (pos < p->buf_len) {
+        if (!crsf_addr_known(p->buf[pos])) {
+            p->state.sync_errors++;
+            pos++;
+            continue;
+        }
+
+        if (p->buf_len - pos < 2) break;              /* ждём байт длины */
+
+        uint8_t declared = p->buf[pos + 1];
+        if (declared < 2 || declared > CRSF_MAX_FRAME_LEN - 2) {
+            p->state.short_or_long_frame_errors++;
+            pos++;                                    /* ложное начало */
+            continue;
+        }
+
+        size_t total = (size_t)declared + 2;          /* ADDR + LEN + declared */
+        if (p->buf_len - pos < total) break;          /* ждём хвост кадра */
+
+        /* Адрес ставим ДО разбора: сохранение кадра link statistics внутри
+         * process_frame() возвращает его на место, а в переданный туда
+         * фрагмент адрес не входит. */
+        p->state.last_addr = p->buf[pos];
+
+        if (process_frame(p, &p->buf[pos + 1], declared)) {
+            if (frame_cb) frame_cb(channel_id, &p->buf[pos], total, cb_ctx);
+            pos += total;
+        } else {
+            pos++;   /* CRC не сошёлся — это было не начало кадра */
+        }
+    }
+
+    if (pos) {
+        p->buf_len -= pos;
+        if (p->buf_len) memmove(p->buf, &p->buf[pos], p->buf_len);
+    }
+}
+
 void crsf_parser_feed(crsf_parser_t *p, uint8_t channel_id, const uint8_t *data, size_t len,
                        protocol_passthrough_cb_t frame_cb, void *cb_ctx)
 {
     p->state.rx_bytes += len;
 
-    for (size_t i = 0; i < len; i++) {
-        uint8_t byte = data[i];
+    size_t i = 0;
+    while (i < len) {
+        /* Добираем буфер до предела и разбираем. Кадр, разрезанный между
+         * вызовами, собирается сам собой: неразобранный хвост остаётся в
+         * буфере до следующей порции. */
+        while (i < len && p->buf_len < sizeof(p->buf)) p->buf[p->buf_len++] = data[i++];
+        parser_scan(p, channel_id, frame_cb, cb_ctx);
+    }
+}
 
-        if (p->buf_len == 0) {
-            if (!crsf_addr_known(byte)) {
-                p->state.sync_errors++;
-                continue; /* ищем начало кадра */
+/* Проверка ЦЕЛОГО кадра, пришедшего готовым куском (из сети, а не с провода).
+ *
+ * Нужна отдельно от потокового разбора: в провод не должно уходить то, что
+ * мы не проверили, а на приёме из сети кадр либо целый, либо его вообще
+ * незачем передавать. Возвращает длину кадра, если он корректен, иначе 0. */
+size_t crsf_frame_check(const uint8_t *frame, size_t len)
+{
+    if (!frame || len < 4 || len > CRSF_MAX_FRAME_LEN) return 0;
+    if (!crsf_addr_known(frame[0])) return 0;
+
+    uint8_t declared = frame[1];
+    if (declared < 2 || declared > CRSF_MAX_FRAME_LEN - 2) return 0;
+    if ((size_t)declared + 2 != len) return 0;
+    if (crsf_crc8_dvb_s2(&frame[2], (size_t)declared - 1) != frame[len - 1]) return 0;
+    return len;
+}
+
+/* Разложить кусок из сети на целые кадры.
+ *
+ * UDP-датаграмма может нести несколько кадров подряд — тогда в провод
+ * должен уйти каждый. Хвост, не собравшийся в целый кадр, НЕ передаётся:
+ * половина кадра на общей шине — это занятая линия и мусор на встречной
+ * стороне. Возвращает число разобранных кадров; *bad_bytes получает
+ * количество байт, которые пришлось выбросить. */
+size_t crsf_split_frames(const uint8_t *data, size_t len, size_t *bad_bytes,
+                         crsf_frame_iter_cb_t cb, void *ctx)
+{
+    size_t frames = 0, bad = 0, pos = 0;
+
+    while (pos < len) {
+        size_t rest = len - pos;
+        if (rest < 4) { bad += rest; break; }
+
+        size_t n = 0;
+        if (crsf_addr_known(data[pos])) {
+            uint8_t declared = data[pos + 1];
+            size_t total = (size_t)declared + 2;
+            if (declared >= 2 && declared <= CRSF_MAX_FRAME_LEN - 2 && total <= rest) {
+                n = crsf_frame_check(&data[pos], total);
             }
-            p->state.last_addr = byte;
-            p->buf[p->buf_len++] = byte;
-            continue;
         }
 
-        if (p->buf_len == 1) {
-            /* второй байт — LEN */
-            if (byte < 2 || byte > (CRSF_MAX_FRAME_LEN - 2)) {
-                p->state.short_or_long_frame_errors++;
-                p->buf_len = 0;
-                continue;
-            }
-            p->buf[p->buf_len++] = byte;
-            continue;
-        }
-
-        p->buf[p->buf_len++] = byte;
-        uint8_t declared_len = p->buf[1];
-        size_t total_frame_bytes = 1 /*SYNC*/ + 1 /*LEN*/ + declared_len;
-
-        if (p->buf_len >= total_frame_bytes || p->buf_len >= CRSF_MAX_FRAME_LEN) {
-            if (p->buf_len >= total_frame_bytes &&
-                process_frame(p, &p->buf[1], declared_len)) {
-                /* Кадр цел — отдаём его целиком и без изменений. */
-                if (frame_cb) frame_cb(channel_id, p->buf, total_frame_bytes, cb_ctx);
-            }
-            p->buf_len = 0;
+        if (n) {
+            if (cb) cb(&data[pos], n, ctx);
+            frames++;
+            pos += n;
+        } else {
+            bad++;
+            pos++;
         }
     }
+
+    if (bad_bytes) *bad_bytes = bad;
+    return frames;
 }
 
 size_t crsf_build_channels_frame(const uint16_t channels[CRSF_NUM_CHANNELS], uint8_t *out_buf, size_t out_buf_size)

@@ -1,0 +1,86 @@
+/*
+ * crsf_txq.h — очередь кадров, ожидающих выхода в однопроводную линию.
+ *
+ * Отдельный модуль без FreeRTOS и ESP-IDF по двум причинам. Во-первых,
+ * решения «что выбросить и что отдать» — это логика, а не работа с
+ * железом, и проверять её надо тестами на хосте. Во-вторых, штатная
+ * очередь FreeRTOS не умеет главного, что здесь нужно: у кадра есть СРОК
+ * ГОДНОСТИ.
+ *
+ * Почему срок годности важнее сохранности. Линия общая, и передавать
+ * можно только в паузах между чужими кадрами. Если пауз нет, накопленное
+ * стареет. Отдать в провод команду управления, простоявшую в очереди
+ * четверть секунды, хуже, чем не отдать её вовсе: приёмник отработает
+ * положение стика, которого уже нет. Поэтому очередь маленькая, кадры
+ * старше окна выбрасываются, а при переполнении вытесняется САМЫЙ СТАРЫЙ,
+ * а не отвергается свежий.
+ *
+ * Выбор чисел (проверять на 400000 бод, RC 250 Гц, кадр ~0.65 мс):
+ *
+ *   CRSF_TXQ_CAPACITY 6      — на 250 Гц это 24 мс потока. Больше держать
+ *                              незачем: всё, что не ушло за это время,
+ *                              всё равно устареет.
+ *   max_age_ms  задаётся при инициализации, штатно
+ *               CRSF_TXQ_DEFAULT_MAX_AGE_MS — десять периодов RC. За это
+ *               время нормальная линия успевает отдать очередь целиком
+ *               даже при плотном встречном потоке; если не успела, значит
+ *               линия занята всерьёз и старое уже не нужно.
+ */
+#pragma once
+#include <stdint.h>
+#include <stdbool.h>
+#include <stddef.h>
+#include "protocol_crsf.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+#define CRSF_TXQ_CAPACITY             6
+#define CRSF_TXQ_DEFAULT_MAX_AGE_MS  40
+
+typedef enum {
+    CRSF_TXQ_OK = 0,
+    CRSF_TXQ_EMPTY,       /* выдавать нечего */
+    CRSF_TXQ_OVERFLOW,    /* кадр принят, но вытеснил самый старый */
+    CRSF_TXQ_INVALID,     /* кадр не прошёл проверку и в линию не пойдёт */
+} crsf_txq_res_t;
+
+typedef struct {
+    uint32_t queued;            /* принято в очередь */
+    uint32_t dropped_stale;     /* выброшено по сроку годности */
+    uint32_t dropped_overflow;  /* вытеснено переполнением */
+    uint32_t dropped_invalid;   /* отвергнуто проверкой длины/CRC */
+    uint16_t depth_max;         /* наибольшая достигнутая глубина */
+} crsf_txq_stats_t;
+
+typedef struct {
+    struct {
+        uint8_t  data[CRSF_MAX_FRAME_LEN];
+        uint8_t  len;
+        uint32_t queued_ms;
+    } slot[CRSF_TXQ_CAPACITY];
+    uint8_t  head;              /* индекс самого старого кадра */
+    uint8_t  count;
+    uint32_t max_age_ms;        /* 0 = не устаревать */
+    crsf_txq_stats_t stats;
+} crsf_txq_t;
+
+void   crsf_txq_init(crsf_txq_t *q, uint32_t max_age_ms);
+size_t crsf_txq_depth(const crsf_txq_t *q);
+
+/* Поставить кадр в очередь. Кадр ПРОВЕРЯЕТСЯ: в линию не должно уходить
+ * то, что не сошлось по длине или CRC. now_ms задаёт момент постановки,
+ * от него считается срок годности. */
+crsf_txq_res_t crsf_txq_push(crsf_txq_t *q, const uint8_t *frame, size_t len, uint32_t now_ms);
+
+/* Забрать самый старый ГОДНЫЙ кадр. Всё, что успело устареть, по дороге
+ * выбрасывается и считается. Возвращает CRSF_TXQ_EMPTY, если годного нет. */
+crsf_txq_res_t crsf_txq_pop(crsf_txq_t *q, uint32_t now_ms, uint8_t *out, size_t *out_len);
+
+/* Есть ли в очереди хоть один ещё не протухший кадр (без изъятия). */
+bool crsf_txq_has_fresh(const crsf_txq_t *q, uint32_t now_ms);
+
+#ifdef __cplusplus
+}
+#endif

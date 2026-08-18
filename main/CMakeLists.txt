@@ -12,6 +12,8 @@ idf_component_register(
         "web_server.c"
         "protocol_crsf.c"
         "crsf_singlewire.c"
+        "crsf_txq.c"
+        "udp_route.c"
         "protocol_sbus.c"
         "protocol_mavlink.c"
         "protocol_raw.c"
