@@ -435,6 +435,22 @@ showProf(0);
 
 function opts(arr,sel){return arr.map((v,i)=>`<option value="${i}"${i==sel?' selected':''}>${v}</option>`).join('');}
 
+/* Значення за замовчуванням приходять ВІД ПРОШИВКИ (/api/config -> sw_defaults).
+   Дублювати їх тут не можна: поле, де нуль означає «типово», показувало б
+   сірим не те, що насправді діє, щойно константу в прошивці змінять.
+   Числа нижче — лише запас на випадок старої прошивки без цього поля. */
+let SWDEF={q:6,age:40,gap:2500,idle:2,rxto:23,ew:60};
+
+/* Поле, у якому НУЛЬ означає «типово». Показувати в такому разі нуль —
+   безглуздо: користувач бачить 0 і не знає, що саме працює. Тому нуль
+   малюється порожнім полем, а діюче значення стоїть підказкою (placeholder)
+   сірим кольором — його видно, але воно не заважає вписати своє. */
+function swNum(id,key,val,dflt,max,w,title){
+  const v=(val===undefined||val===null||val===0)?'':val;
+  return `<input type="number" id="c${id}_${key}" min="0" max="${max}" value="${v}" `+
+         `placeholder="${dflt}" style="width:${w}px" title="${title}. Порожнє = типово ${dflt}">`;
+}
+
 function uartForm(c){
   const id=c.channel_id;
   return `<div class="card"><h2>${c.name} — параметри порту</h2>
@@ -457,16 +473,16 @@ function uartForm(c){
     <select id="c${id}_pp">${[[0,'відкритий стік'],[1,'двотактний']].map(x=>`<option value="${x[0]}"${x[0]===(c.tx_push_pull?1:0)?' selected':''}>${x[1]}</option>`).join('')}</select>
     <select id="c${id}_pull">${[[0,'підтяжка вгору'],[1,'підтяжка вниз'],[2,'без підтяжки']].map(x=>`<option value="${x[0]}"${x[0]===(c.pull||0)?' selected':''}>${x[1]}</option>`).join('')}</select></div>
   <div class="row" id="c${id}_swrow2"><label>Черга на передачу</label>
-    <input type="number" id="c${id}_q" min="0" max="16" value="${c.sw_tx_queue_frames||0}" style="width:60px" title="кадрів, 0 = типово 6">
-    <input type="number" id="c${id}_age" min="0" max="10000" value="${c.sw_tx_max_age_ms||0}" style="width:70px" title="придатність кадру, мс, 0 = типово 40">
+    ${swNum(id,'q',c.sw_tx_queue_frames,SWDEF.q,16,60,'кадрів у черзі')}
+    ${swNum(id,'age',c.sw_tx_max_age_ms,SWDEF.age,10000,70,'придатність кадру, мс')}
     <span class="hint">кадрів / мс придатності</span></div>
   <div class="row" id="c${id}_swrow3"><label>Такт і очікування</label>
-    <input type="number" id="c${id}_gap" min="0" max="60000" value="${c.sw_tx_min_gap_us||0}" style="width:70px" title="пауза між своїми посилками, мкс, 0 = типово 2500">
-    <input type="number" id="c${id}_idle" min="0" max="250" value="${c.sw_idle_wait_ms||0}" style="width:60px" title="очікування за мовчазної лінії, мс, 0 = типово 2">
-    <input type="number" id="c${id}_rxto" min="0" max="126" value="${c.sw_rx_timeout_symbols||0}" style="width:60px" title="таймаут «лінія замовкла», символів, 0 = типово 23">
-    <input type="number" id="c${id}_ew" min="0" max="10000" value="${c.sw_echo_window_ms||0}" style="width:60px" title="вікно впізнавання власного відлуння, мс, 0 = типово 60">
+    ${swNum(id,'gap',c.sw_tx_min_gap_us,SWDEF.gap,60000,70,'пауза між своїми посилками, мкс')}
+    ${swNum(id,'idle',c.sw_idle_wait_ms,SWDEF.idle,250,60,'очікування за мовчазної лінії, мс')}
+    ${swNum(id,'rxto',c.sw_rx_timeout_symbols,SWDEF.rxto,126,60,'таймаут «лінія замовкла», символів')}
+    ${swNum(id,'ew',c.sw_echo_window_ms,SWDEF.ew,10000,60,'вікно впізнавання власного відлуння, мс')}
     <span class="hint">мкс / мс / симв. / мс</span></div>
-  <div class="row"><span class="hint"><b>0 у будь-якому полі — значення за замовчуванням.</b>
+  <div class="row"><span class="hint"><b>Порожнє поле — значення за замовчуванням, воно показане сірим у самому полі.</b>
     Усі шість похідні від ТЕМПУ лінії й розраховані на CRSF 400000 бод, 250 кадрів/с.
     Глибина черги та придатність задають пріоритет СВІЖОСТІ над збереженням: для керування застарілий кадр шкідливіший за втрачений, бо описує положення стика, якого вже немає — збільшення дасть не менше втрат, а затримку. Піднімати їх має сенс там, де в дріт іде телеметрія, а не керування.</span></div>
   <div class="row"><span class="hint">Діє лише в однодротовому режимі. Типово — відкритий стік і підтяжка вгору: на лінії пульта це вимірюється найкраще (45% спотвореного відлуння при НУЛІ помилок приймання). Двотактний формує обидва фронти сам, але за одночасної передачі двох кінців виходи боротимуться. Підтяжка має збігатися з рівнем спокою ЛІНІЇ. Зовнішній резистор 1–4.7 кОм надійніший за внутрішні ~45 кОм.</span></div>
@@ -567,6 +583,7 @@ function collect(){
     c.duplex=+g('c'+i+'_dup').value;
     if(g('c'+i+'_pp'))c.tx_push_pull=+g('c'+i+'_pp').value===1;
     if(g('c'+i+'_pull'))c.pull=+g('c'+i+'_pull').value;
+    /* Порожнє поле і нуль — одне й те саме: «типово». */
     const num0=(id,max)=>{const e=g(id); if(!e)return undefined; const v=parseInt(e.value,10); return isNaN(v)?0:Math.min(Math.max(v,0),max);};
     let t;
     if((t=num0('c'+i+'_q',16))!==undefined)c.sw_tx_queue_frames=t;
@@ -617,7 +634,9 @@ function collect(){
 async function loadCfg(){
   const r=await fetch('/api/config');
   if(!r.ok){toast('Помилка завантаження конфігурації',1);return;}
-  cfg=await r.json();render();
+  cfg=await r.json();
+  if(cfg.sw_defaults)SWDEF=cfg.sw_defaults;
+  render();
 }
 async function save(){
   collect();

@@ -5,6 +5,8 @@
 #include "config_manager.h"
 #include "board_config.h"
 #include "crsf_txq.h"
+#include "crsf_singlewire.h"
+#include "crsf_echo.h"
 #include "nvs_flash.h"
 #include "nvs.h"
 #include "esp_log.h"
@@ -678,6 +680,20 @@ char *config_manager_to_json(const app_config_t *cfg)
     cJSON_AddStringToObject(root, "web_user", cfg->web_user);
     /* ВНИМАНИЕ: хеш и соль пароля НЕ экспортируются в JSON. */
     cJSON_AddBoolToObject(root, "verbose_log", cfg->verbose_log);
+    /* Значения по умолчанию для арбитража общего провода отдаём наружу,
+     * а не дублируем в интерфейсе. Иначе поле, где ноль означает «типово»,
+     * рисовало бы серым не то, что действительно работает: продублированное
+     * число живёт своей жизнью и расходится с прошивкой при первой же
+     * правке константы. */
+    cJSON *swd = cJSON_CreateObject();
+    cJSON_AddNumberToObject(swd, "q",    CRSF_TXQ_CAPACITY);
+    cJSON_AddNumberToObject(swd, "age",  CRSF_TXQ_DEFAULT_MAX_AGE_MS);
+    cJSON_AddNumberToObject(swd, "gap",  CRSF_SW_TX_MIN_GAP_US);
+    cJSON_AddNumberToObject(swd, "idle", CRSF_SW_IDLE_WAIT_MS);
+    cJSON_AddNumberToObject(swd, "rxto", CRSF_SW_RX_TIMEOUT_SYMBOLS);
+    cJSON_AddNumberToObject(swd, "ew",   CRSF_ECHO_HIST_MS);
+    cJSON_AddItemToObject(root, "sw_defaults", swd);
+
     cJSON_AddNumberToObject(root, "active_profile", cfg->active_profile);
 
     char *out = cJSON_PrintUnformatted(root);
