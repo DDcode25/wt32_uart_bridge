@@ -784,6 +784,34 @@ async function poll(){
                         0x1E:'Attitude',0x21:'Режим',0x28:'Ping',0x29:'Device info',
                         0x7A:'MSP req',0x7B:'MSP resp'};
       const hex=v=>'0x'+v.toString(16).toUpperCase().padStart(2,'0');
+      /* Розшифровка полів link statistics (кадр 0x14). Показуємо з одиницями
+         навіть коли пристрій кладе туди нулі: інакше «0 / 0 / 0» неможливо
+         відрізнити від «поле не заповнене». */
+      const TXPOW={0:'0 мВт',1:'10 мВт',2:'25 мВт',3:'100 мВт',4:'500 мВт',
+                   5:'1 Вт',6:'2 Вт',7:'250 мВт',8:'50 мВт'};
+      /* Значення rf_mode залежить від системи: у TBS Crossfire це 4/50/150 Гц,
+         в ELRS — власна таблиця. Тому показуємо індекс, а розшифровку — лише
+         як підказку. */
+      const RFMODE={0:'4 Гц',1:'50 Гц',2:'150 Гц'};
+      const rssi=v=>v?`−${v} dBm`:'0 <span class="mut">(не заповнено)</span>';
+      const lq=v=>`${v} %`;
+      const snr=v=>`${v} dB`;
+      function crsfLink(x,dir){
+        const up=dir==='up';
+        return row(up?'Uplink якість':'Downlink якість',
+                 `LQ <b>${lq(up?x.uplink_lq:x.downlink_lq)}</b> · RSSI ${rssi(up?x.uplink_rssi:x.downlink_rssi)}`+
+                 (up&&x.uplink_rssi_2?` / ${rssi(x.uplink_rssi_2)} <span class="mut">(ант. 2)</span>`:'')+
+                 ` · SNR ${snr(up?x.uplink_snr:x.downlink_snr)}`);
+      }
+      function crsfRadio(x){
+        const p=x.uplink_tx_power, m=x.rf_mode, a=x.active_antenna;
+        return row('Потужність передавача',
+                 (TXPOW[p]!==undefined?TXPOW[p]:'?')+` <span class="mut">(індекс ${p})</span>`)+
+               row('Режим RF',
+                 `індекс ${m}`+(RFMODE[m]?` <span class="mut">— у TBS Crossfire це ${RFMODE[m]}; в інших системах таблиця своя</span>`:''))+
+               row('Активна антена', a===0?'1':(a===1?'2':String(a)));
+      }
+
       function crsfTypes(cr){
         if(!cr.types||!cr.types.length)return '<span class="mut">—</span>';
         return cr.types.map(e=>`<span class="ty">${TYPE_NAMES[e.type]||hex(e.type)}: ${e.count}</span>`).join('')+
@@ -802,9 +830,8 @@ async function poll(){
           row('Останній тип',n.rx_frames_total?hex(n.last_type)+
               (TYPE_NAMES[n.last_type]?' · '+TYPE_NAMES[n.last_type]:''):'—')+
           row('Типи кадрів',crsfTypes(n));
-        if(n.link_stats_ms)r+=row('Downlink LQ / RSSI / SNR',
-              n.downlink_lq+' / '+n.downlink_rssi+' / '+n.downlink_snr)+
-          row('TX power / RF mode / антена',n.uplink_tx_power+' / '+n.rf_mode+' / '+n.active_antenna);
+        if(n.link_stats_ms)r+=crsfLink(n,'down')+crsfRadio(n);
+        else r+=row('Link statistics','<span class="mut">кадрів 0x14 не було</span>');
         if(n.battery.ms)r+=row('Батарея',(n.battery.voltage_dv/10).toFixed(1)+' В · '+
               (n.battery.current_da/10).toFixed(1)+' А · '+n.battery.used_mah+' мА·год · '+
               n.battery.remaining_pct+'%');
@@ -865,7 +892,8 @@ async function poll(){
         row('Помилок CRC',c.crsf.crc_errors>0?`<span class="err">${c.crsf.crc_errors}</span>`:'0')+
         row('Помилок синхронізації',c.crsf.sync_errors)+row('Некоректна довжина',c.crsf.bad_length_frames)+
         row('Failsafe',c.crsf.failsafe?'<span class="err">ТАК</span>':'ні')+
-        row('Uplink LQ / RSSI / SNR',c.crsf.uplink_lq+' / '+c.crsf.uplink_rssi+' / '+c.crsf.uplink_snr)+
+        (c.crsf.link_stats_ms?crsfLink(c.crsf,'up')+crsfLink(c.crsf,'down')+crsfRadio(c.crsf)
+                             :row('Link statistics','<span class="mut">кадрів 0x14 не було</span>'))+
         row('Типи кадрів',crsfTypes(c.crsf));}
       if(c.crsf_singlewire){
         const w=c.crsf_singlewire;
