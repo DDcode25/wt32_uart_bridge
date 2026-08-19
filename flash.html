@@ -62,6 +62,10 @@
   ol, ul { padding-left: 1.4rem; }
   li { margin: .35rem 0; }
   footer { margin-top: 3rem; padding-top: 1rem; border-top: 1px solid var(--border); color: var(--muted); font-size: .875rem; }
+  table.dl{width:100%;border-collapse:collapse;margin:14px 0}
+  table.dl th,table.dl td{border:1px solid #2a3140;padding:8px 10px;text-align:left;vertical-align:top}
+  table.dl th{background:#161b24;font-weight:600}
+  table.dl .hint{font-size:12px;opacity:.7}
 </style>
 </head>
 <body>
@@ -143,7 +147,7 @@
   </esp-web-install-button>
 </div>
 
-<h2>3b. Бета-версія</h2>
+<h2>3b. Бета-версія — v1.4.0-beta.3</h2>
 
 <p>Збірка зі змінами, які ще не увійшли до стабільного випуску. Працює так само,
 але перевірена менше. Якщо щось піде не так — стабільну можна залити назад
@@ -204,10 +208,43 @@ S.Port») вона піднімається і відповідає по мер�
 сторінка <strong>Firmware/About</strong> в її web-інтерфейсі приймає
 оновлення мережею.</p>
 
-<p>Для цього потрібен <a href="firmware/firmware.bin" download><strong>firmware.bin</strong></a>
-— лише застосунок (бета-версія: <a href="firmware/beta/firmware.bin" download>firmware.bin</a>).
-Об’єднаний образ із цієї сторінки для OTA не підходить: він містить завантажувач
-і таблицю розділів, і перевірка його відхилить.</p>
+<p>Відкрийте <strong>Firmware/About</strong> у web-інтерфейсі плати, натисніть
+<em>«Вибрати файл і прошити»</em> і вкажіть <code>firmware.bin</code>. Образ
+пишеться в неактивний слот, тож поточна прошивка лишається цілою до самого
+кінця, і плата перезавантажується сама.</p>
+
+<h3>Що завантажити</h3>
+
+<table class="dl">
+  <tr><th>Збірка</th><th>Для OTA мережею</th><th>Для дроту з адреси 0x0</th></tr>
+  <tr>
+    <td><strong>Бета</strong> — v1.4.0-beta.3<br><span class="hint">нове, перевірене менше</span></td>
+    <td><a href="firmware/beta/firmware.bin" download>firmware.bin</a></td>
+    <td><a href="firmware/beta/firmware_merged.bin" download>firmware_merged.bin</a></td>
+  </tr>
+  <tr>
+    <td><strong>Стабільна</strong><br><span class="hint">кнопка 3 вище</span></td>
+    <td><a href="firmware/firmware.bin" download>firmware.bin</a></td>
+    <td><a href="firmware/firmware_merged.bin" download>firmware_merged.bin</a></td>
+  </tr>
+  <tr>
+    <td><strong>Відновлення</strong> — v1.3.0-37-g7c9e804<br><span class="hint">остання, що працювала на обох платах</span></td>
+    <td><a href="firmware/recovery/firmware.bin" download>firmware.bin</a></td>
+    <td><a href="firmware/recovery/firmware_merged.bin" download>firmware_merged.bin</a></td>
+  </tr>
+</table>
+
+<p><strong>Для OTA беріть саме <code>firmware.bin</code>.</strong> Об’єднаний
+образ містить завантажувач і таблицю розділів, і перевірка образу його
+відхилить — це не помилка, а захист від запису чужого файлу.</p>
+
+<div class="note">
+  <p><strong>Схема конфігурації у беті — 8.</strong> Якщо на платі стоїть
+  старіша, налаштування після оновлення заміняться заводськими, і плата
+  повернеться на <code>192.168.1.50</code>. Це не поломка. Спершу
+  <em>Експорт JSON</em> на сторінці Firmware/About, потім оновлення, потім
+  імпорт назад.</p>
+</div>
 
 <div class="note">
   <p>Доступ до OTA підпорядкований загальному налаштуванню автентифікації. Поки вхід без
