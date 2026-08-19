@@ -510,6 +510,47 @@ static void test_retarget(void)
     CHECK(bad[0] == CRSF_ADDR_FLIGHT_CONTROLLER, "и остаётся нетронутым");
 }
 
+static void test_echo_hist(void)
+{
+    printf("== узнавание собственного кадра целиком ==\n");
+    crsf_echo_hist_t h; memset(&h, 0, sizeof(h));
+    uint16_t ch[CRSF_NUM_CHANNELS];
+    for (int i = 0; i < CRSF_NUM_CHANNELS; i++) ch[i] = 992;
+    uint8_t mine[32];
+    size_t n = crsf_build_channels_frame(ch, mine, sizeof(mine));
+
+    crsf_echo_hist_add(&h, mine, n, 1000);
+    CHECK(crsf_echo_hist_take(&h, mine, n, 1005), "свой кадр опознан после разбора");
+    CHECK(!crsf_echo_hist_take(&h, mine, n, 1006),
+          "и изъят — одна посылка не может съесть два кадра");
+
+    /* Чужой кадр не трогаем */
+    for (int i = 0; i < CRSF_NUM_CHANNELS; i++) ch[i] = 500;
+    uint8_t other[32];
+    size_t on = crsf_build_channels_frame(ch, other, sizeof(other));
+    crsf_echo_hist_add(&h, mine, n, 2000);
+    CHECK(!crsf_echo_hist_take(&h, other, on, 2005), "чужой кадр проходит наружу");
+    CHECK(crsf_echo_hist_take(&h, mine, n, 2005), "а свой по-прежнему узнаётся");
+
+    /* Просроченное эхо уже не наше: за окном на проводе его не бывает */
+    crsf_echo_hist_add(&h, mine, n, 3000);
+    CHECK(!crsf_echo_hist_take(&h, mine, n, 3000 + CRSF_ECHO_HIST_MS + 1),
+          "за окном совпадение не засчитывается");
+
+    /* Несколько посылок подряд — узнаются все */
+    memset(&h, 0, sizeof(h));
+    uint8_t f[CRSF_ECHO_HIST_FRAMES][32]; size_t fl[CRSF_ECHO_HIST_FRAMES];
+    for (int i = 0; i < CRSF_ECHO_HIST_FRAMES; i++) {
+        for (int k = 0; k < CRSF_NUM_CHANNELS; k++) ch[k] = (uint16_t)(300 + i * 100);
+        fl[i] = crsf_build_channels_frame(ch, f[i], sizeof(f[i]));
+        crsf_echo_hist_add(&h, f[i], fl[i], 4000 + i);
+    }
+    int all = 1;
+    for (int i = 0; i < CRSF_ECHO_HIST_FRAMES; i++)
+        if (!crsf_echo_hist_take(&h, f[i], fl[i], 4010)) all = 0;
+    CHECK(all, "все посылки из истории узнаются");
+}
+
 int main(void)
 {
     test_crc();
@@ -526,6 +567,7 @@ int main(void)
     test_udp_route();
     test_echo();
     test_retarget();
+    test_echo_hist();
 
     printf("\n%s: %d проверок, %d провалов\n",
            fails ? "ТЕСТЫ НЕ ПРОШЛИ" : "ВСЕ ТЕСТЫ ПРОШЛИ", checks, fails);

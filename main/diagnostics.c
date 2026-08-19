@@ -443,6 +443,7 @@ char *diagnostics_status_json(void)
             cJSON_AddNumberToObject(j, "tx_uart_errors", sw.tx_uart_errors);
             cJSON_AddNumberToObject(j, "tx_hold_overruns", sw.tx_hold_overruns);
             cJSON_AddNumberToObject(j, "echo_suppressed", sw.echo_suppressed);
+            cJSON_AddNumberToObject(j, "echo_frames_dropped", sw.echo_frames_dropped);
             cJSON_AddNumberToObject(j, "echo_mismatches", sw.echo_mismatches);
             cJSON_AddNumberToObject(j, "pings_answered", sw.pings_answered);
             cJSON_AddNumberToObject(j, "rx_to_tx_switches", sw.rx_to_tx_switches);

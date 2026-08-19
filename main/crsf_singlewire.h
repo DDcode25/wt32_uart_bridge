@@ -126,6 +126,9 @@ typedef struct {
     uint32_t tx_hold_overruns;   /* линия удерживалась дольше расчётного */
 
     uint32_t echo_suppressed;    /* своё эхо снято с приёма целиком */
+    /* Свои кадры, опознанные уже после разбора и не отданные наружу.
+     * Растущий счётчик — норма для общего провода, а не отказ. */
+    uint32_t echo_frames_dropped;
     uint32_t echo_mismatches;    /* своё эхо вернулось искажённым */
     uint32_t pings_answered;     /* опросов устройств, на которые мы ответили */
     uint32_t rx_to_tx_switches;

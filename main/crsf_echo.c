@@ -47,3 +47,26 @@ size_t crsf_echo_strip(crsf_echo_t *e, uint8_t *buf, size_t len,
     }
     return len;
 }
+
+void crsf_echo_hist_add(crsf_echo_hist_t *h, const uint8_t *frame, size_t len, uint32_t now_ms)
+{
+    if (len == 0 || len > CRSF_MAX_FRAME_LEN) return;
+    memcpy(h->slot[h->next].data, frame, len);
+    h->slot[h->next].len = (uint8_t)len;
+    h->slot[h->next].ms  = now_ms;
+    h->next = (uint8_t)((h->next + 1) % CRSF_ECHO_HIST_FRAMES);
+}
+
+bool crsf_echo_hist_take(crsf_echo_hist_t *h, const uint8_t *frame, size_t len, uint32_t now_ms)
+{
+    for (uint8_t i = 0; i < CRSF_ECHO_HIST_FRAMES; i++) {
+        if (h->slot[i].len != len) continue;
+        /* Разность знаковая: переполнение счётчика миллисекунд не должно
+         * превращать свежую запись в просроченную. */
+        if ((int32_t)(now_ms - h->slot[i].ms) > CRSF_ECHO_HIST_MS) continue;
+        if (memcmp(h->slot[i].data, frame, len) != 0) continue;
+        h->slot[i].len = 0;      /* изымаем: одна посылка — одно совпадение */
+        return true;
+    }
+    return false;
+}

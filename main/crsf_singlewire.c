@@ -41,6 +41,10 @@ static struct {
     /* Хвост собственного эха, который не успел доехать к моменту чтения
      * сразу после посылки. Досопоставляется в следующих чтениях. */
     crsf_echo_t     echo;
+    /* Второй рубеж: узнавание собственного кадра целиком, без опоры на
+     * тайминг. См. crsf_echo.h — там разобрано, почему потокового снятия
+     * эха недостаточно. */
+    crsf_echo_hist_t echo_hist;
     volatile bool   running;
     volatile bool   should_exit;
 } s;
@@ -125,6 +129,20 @@ static void line_to_rx(void)
 static void on_frame(uint8_t channel_id, const uint8_t *frame, size_t len, void *ctx)
 {
     (void)channel_id; (void)ctx;
+
+    /* Наш собственный кадр наружу НЕ отдаём.
+     *
+     * Потоковое снятие эха выше могло его пропустить: оно опирается на
+     * время, а эхо не обязано приходить в срок. Пропущенный кадр валиден
+     * по всем признакам — он и есть наш, — поэтому отличить его можно
+     * только по содержимому. Без этой проверки поток управления уезжал
+     * обратно в пульт: 101 кадр в секунду типа RC_CHANNELS_PACKED, и
+     * пульт от этого зависал. */
+    if (crsf_echo_hist_take(&s.echo_hist, frame, len, now_ms())) {
+        s.stats.echo_frames_dropped++;
+        return;
+    }
+
     s.stats.rx_frames++;
     s.stats.last_rx_ms = now_ms();
 
@@ -173,6 +191,7 @@ static void transmit_frame(const uint8_t *data, size_t len)
      * в секунду при двадцати посылках. Сверка по содержимому теряет только
      * то, что действительно наше; всё, что разошлось, идёт в разбор. */
     crsf_echo_expect(&s.echo, data, len, now_ms(), CRSF_ECHO_TTL_MS);
+    crsf_echo_hist_add(&s.echo_hist, data, len, now_ms());
 
     uint8_t echo[CRSF_MAX_FRAME_LEN];
     int got = uart_read_bytes(s.cfg.port, echo, len, 0);
