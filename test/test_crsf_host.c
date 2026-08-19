@@ -577,6 +577,58 @@ static void test_txq_capacity(void)
     CHECK(q.capacity == CRSF_TXQ_CAPACITY_MAX, "запредельное режется до предела массива");
 }
 
+static void test_gap_resync(void)
+{
+    printf("== ресинхронизация по тишине (как в Betaflight) ==\n");
+    uint16_t ch[CRSF_NUM_CHANNELS];
+    for (int i = 0; i < CRSF_NUM_CHANNELS; i++) ch[i] = 992;
+    uint8_t fr[32];
+    size_t n = crsf_build_channels_frame(ch, fr, sizeof(fr));
+
+    uint32_t gap = crsf_frame_gap_us_for_baud(400000);
+    CHECK(gap > 1500 && gap < 3000, "порог для 400000 бод около 2.4 мс");
+    CHECK(crsf_frame_gap_us_for_baud(115200) > gap,
+          "для медленной линии порог больше — иначе резал бы кадры");
+    CHECK(crsf_frame_gap_us_for_baud(0) == 0, "нулевая скорость не ломает расчёт");
+
+    /* Кадр, разрезанный БЕЗ паузы, собирается */
+    crsf_parser_t p; crsf_parser_init(&p);
+    crsf_parser_set_gap_us(&p, gap);
+    cap_reset();
+    crsf_parser_feed_at(&p, 1000, 0, fr, 7, cap_cb, NULL);
+    crsf_parser_feed_at(&p, 1000 + gap / 2, 0, &fr[7], n - 7, cap_cb, NULL);
+    CHECK(cap_n == 1, "разрез без паузы кадр не ломает");
+    CHECK(p.state.stale_drops == 0, "и ничего не выброшено");
+
+    /* Тот же разрез, но через паузу: обрывок выброшен, кадр не собран */
+    crsf_parser_t p2; crsf_parser_init(&p2);
+    crsf_parser_set_gap_us(&p2, gap);
+    cap_reset();
+    crsf_parser_feed_at(&p2, 1000, 0, fr, 7, cap_cb, NULL);
+    crsf_parser_feed_at(&p2, 1000 + gap + 1, 0, &fr[7], n - 7, cap_cb, NULL);
+    CHECK(cap_n == 0, "через паузу обрывок не склеивается с хвостом");
+    CHECK(p2.state.stale_drops == 1, "выброшенное учтено");
+
+    /* Главное, ради чего это делалось: мусор перед настоящим кадром не
+     * доживает до него и не порождает ложных начал. */
+    crsf_parser_t p3; crsf_parser_init(&p3);
+    crsf_parser_set_gap_us(&p3, gap);
+    cap_reset();
+    uint8_t junk[9] = { CRSF_ADDR_FLIGHT_CONTROLLER, 24, 0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5, 0xA6 };
+    crsf_parser_feed_at(&p3, 5000, 0, junk, sizeof(junk), cap_cb, NULL);
+    crsf_parser_feed_at(&p3, 5000 + gap + 1, 0, fr, n, cap_cb, NULL);
+    CHECK(cap_n == 1 && cap[0].len == n, "настоящий кадр после паузы разобран");
+    CHECK(memcmp(cap[0].data, fr, n) == 0, "и не искажён остатками мусора");
+
+    /* Выключенный порог оставляет прежнее поведение */
+    crsf_parser_t p4; crsf_parser_init(&p4);
+    cap_reset();
+    crsf_parser_feed_at(&p4, 1000, 0, fr, 7, cap_cb, NULL);
+    crsf_parser_feed_at(&p4, 9000000, 0, &fr[7], n - 7, cap_cb, NULL);
+    CHECK(cap_n == 1, "без порога склейка через паузу работает как раньше");
+    CHECK(p4.state.stale_drops == 0, "и ничего не выбрасывается");
+}
+
 int main(void)
 {
     test_crc();
@@ -586,6 +638,7 @@ int main(void)
     test_invalid_length();
     test_invalid_crc();
     test_resync();
+    test_gap_resync();
     test_broadcast_addr();
     test_udp_split();
     test_txq();

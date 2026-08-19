@@ -325,9 +325,35 @@ static void parser_scan(crsf_parser_t *p, uint8_t channel_id,
     }
 }
 
-void crsf_parser_feed(crsf_parser_t *p, uint8_t channel_id, const uint8_t *data, size_t len,
-                       protocol_passthrough_cb_t frame_cb, void *cb_ctx)
+uint32_t crsf_frame_gap_us_for_baud(uint32_t baud)
 {
+    if (!baud) return 0;
+    /* Самый длинный кадр: 64 байта по 10 бит. Плюс половина сверху на
+     * задержку доставки — резать настоящий кадр дороже, чем подержать
+     * мусор лишнюю миллисекунду. */
+    uint32_t frame_us = (uint32_t)((uint64_t)CRSF_MAX_FRAME_LEN * 10 * 1000000 / baud);
+    return frame_us + frame_us / 2;
+}
+
+void crsf_parser_set_gap_us(crsf_parser_t *p, uint32_t gap_us)
+{
+    p->gap_us = gap_us;
+}
+
+void crsf_parser_feed_at(crsf_parser_t *p, uint32_t now_us,
+                         uint8_t channel_id, const uint8_t *data, size_t len,
+                         protocol_passthrough_cb_t frame_cb, void *cb_ctx)
+{
+    /* Тишина дольше кадра — то, что лежит в буфере, к следующим байтам
+     * отношения не имеет. Разность знаковая: переполнение счётчика не должно
+     * выбрасывать буфер на ровном месте. */
+    if (p->gap_us && p->buf_len &&
+        (int32_t)(now_us - p->last_feed_us) > (int32_t)p->gap_us) {
+        p->state.stale_drops++;
+        p->buf_len = 0;
+    }
+    p->last_feed_us = now_us;
+
     p->state.rx_bytes += len;
 
     size_t i = 0;
@@ -338,6 +364,13 @@ void crsf_parser_feed(crsf_parser_t *p, uint8_t channel_id, const uint8_t *data,
         while (i < len && p->buf_len < sizeof(p->buf)) p->buf[p->buf_len++] = data[i++];
         parser_scan(p, channel_id, frame_cb, cb_ctx);
     }
+}
+
+void crsf_parser_feed(crsf_parser_t *p, uint8_t channel_id, const uint8_t *data, size_t len,
+                       protocol_passthrough_cb_t frame_cb, void *cb_ctx)
+{
+    crsf_parser_feed_at(p, (uint32_t)esp_timer_get_time(), channel_id, data, len,
+                        frame_cb, cb_ctx);
 }
 
 /* Проверка ЦЕЛОГО кадра, пришедшего готовым куском (из сети, а не с провода).

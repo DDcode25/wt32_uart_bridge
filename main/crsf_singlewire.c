@@ -505,6 +505,8 @@ esp_err_t crsf_singlewire_start(const crsf_sw_cfg_t *cfg, crsf_sw_frame_cb_t cb,
     s.cb = cb;
     s.cb_ctx = ctx;
     crsf_parser_init(&s.parser);
+    /* Ресинхронизация по тишине НЕ включается, и это проверено на линии.
+     * Причину см. в protocol_crsf.h у crsf_parser_set_gap_us(). */
 
     uart_config_t uc = {
         .baud_rate  = (int)cfg->baud,

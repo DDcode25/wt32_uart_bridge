@@ -224,6 +224,7 @@ static cJSON *crsf_state_to_json(const crsf_state_t *st)
     cJSON_AddNumberToObject(cr, "last_addr", st->last_addr);
     cJSON_AddNumberToObject(cr, "last_type", st->last_type);
     cJSON_AddNumberToObject(cr, "bad_length_frames", st->short_or_long_frame_errors);
+    cJSON_AddNumberToObject(cr, "stale_drops", st->stale_drops);
     cJSON_AddBoolToObject(cr, "failsafe", st->failsafe_active);
 
     cJSON_AddNumberToObject(cr, "uplink_lq", st->uplink_link_quality);
