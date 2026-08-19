@@ -24,6 +24,16 @@ static const char *TAG = "crsf_sw";
  * обрезает строку, так что копировать больше незачем. */
 #define ECHO_DUMP_MAX_BYTES 32
 
+/* Глубина очереди кадров наружу. Хватает на пачку, которую драйвер отдал
+ * разом; больше держать незачем — отставание сетевой задачи означает, что
+ * сеть не успевает, и копить тут нечего. */
+#define OUT_QUEUE_FRAMES  16
+
+typedef struct {
+    uint8_t len;
+    uint8_t data[CRSF_MAX_FRAME_LEN];
+} out_frame_t;
+
 static struct {
     crsf_sw_cfg_t   cfg;
     crsf_sw_stats_t stats;
@@ -45,6 +55,10 @@ static struct {
      * тайминг. См. crsf_echo.h — там разобрано, почему потокового снятия
      * эха недостаточно. */
     crsf_echo_hist_t echo_hist;
+    /* Кадры, готовые уйти НАРУЖУ. Отдаём их отдельной задаче, а не зовём
+     * колбэк прямо из приёмного цикла: см. rx_out_task(). */
+    QueueHandle_t   out_queue;
+    TaskHandle_t    out_task;
     volatile bool   running;
     volatile bool   should_exit;
 } s;
@@ -104,6 +118,11 @@ const char *crsf_singlewire_state_name(crsf_sw_state_t st)
  * сигнал, потом переводим вывод во вход. */
 static void line_to_tx(void)
 {
+    /* Открытый сток, а не двухтактный выход. Двухтактный пробовали: на
+     * проводе пульта он дал 50% искажённых посылок против 45%, то есть не
+     * помог, — значит фронты и подтяжка тут ни при чём. А риск он добавляет
+     * реальный: при одновременной передаче обоих концов выходы боролись бы
+     * вместо того, чтобы совместно тянуть линию вниз. */
     gpio_set_direction((gpio_num_t)s.cfg.gpio, GPIO_MODE_INPUT_OUTPUT_OD);
     esp_rom_gpio_connect_out_signal(s.cfg.gpio,
                                     UART_PERIPH_SIGNAL(s.cfg.port, SOC_UART_TX_PIN_IDX),
@@ -152,7 +171,37 @@ static void on_frame(uint8_t channel_id, const uint8_t *frame, size_t len, void 
         if (n && crsf_singlewire_send_frame(info, n) == ESP_OK) s.stats.pings_answered++;
     }
 
-    if (s.cb) s.cb(frame, len, s.cb_ctx);
+    /* Наружу отдаём ЧЕРЕЗ ОЧЕРЕДЬ, а не отсюда.
+     *
+     * Колбэк уходит в маршрутизацию и делает отправку UDP — сетевой вызов
+     * посреди приёмного цикла провода. Измерено на живой линии: разбор
+     * пачки занимал до 5092 мкс при промежутке между кадрами пульта в
+     * 3.35 мс и периоде 4 мс. То есть к моменту, когда планировщик доходил
+     * до передачи, пульт уже начинал следующий кадр, и мы били прямо в
+     * него: 45-50% искажённых посылок вместо расчётных 25% при случайном
+     * моменте.
+     *
+     * Владелец провода обязан заниматься только проводом. Всё, что дольше
+     * микросекунд, уходит другой задаче. */
+    if (s.out_queue) {
+        out_frame_t of;
+        of.len = (uint8_t)len;
+        memcpy(of.data, frame, len);
+        if (xQueueSend(s.out_queue, &of, 0) != pdTRUE) s.stats.out_queue_drops++;
+    }
+}
+
+/* Отдача кадров наружу: сеть, статистика, дамп. Отдельная задача и
+ * приоритет НИЖЕ провода — задержка здесь дешева, а на проводе нет. */
+static void rx_out_task(void *arg)
+{
+    (void)arg;
+    out_frame_t of;
+    while (!s.should_exit) {
+        if (xQueueReceive(s.out_queue, &of, pdMS_TO_TICKS(20)) != pdTRUE) continue;
+        if (s.cb) s.cb(of.data, of.len, s.cb_ctx);
+    }
+    vTaskDelete(NULL);
 }
 
 /* Отдать один кадр в линию.
@@ -465,6 +514,12 @@ esp_err_t crsf_singlewire_start(const crsf_sw_cfg_t *cfg, crsf_sw_frame_cb_t cb,
     gpio_set_pull_mode((gpio_num_t)cfg->gpio, GPIO_PULLUP_ONLY);
     s.stats.tx_to_rx_switches = 0;   /* стартовое переключение не считаем */
 
+    s.out_queue = xQueueCreate(OUT_QUEUE_FRAMES, sizeof(out_frame_t));
+    if (!s.out_queue) {
+        uart_driver_delete(cfg->port);
+        return ESP_ERR_NO_MEM;
+    }
+
     crsf_txq_init(&s.txq, CRSF_TXQ_DEFAULT_MAX_AGE_MS);
     s.txq_lock = xSemaphoreCreateMutex();
     if (!s.txq_lock) {
@@ -485,6 +540,13 @@ esp_err_t crsf_singlewire_start(const crsf_sw_cfg_t *cfg, crsf_sw_frame_cb_t cb,
         return ESP_FAIL;
     }
 
+    if (xTaskCreatePinnedToCore(rx_out_task, "crsf_sw_out", 4096, NULL, 9,
+                                &s.out_task, tskNO_AFFINITY) != pdPASS) {
+        ESP_LOGE(TAG, "failed to create out task");
+        s.running = false;
+        return ESP_FAIL;
+    }
+
     ESP_LOGI(TAG, "CRSF SingleWire initialized");
     ESP_LOGI(TAG, "  GPIO: %d", cfg->gpio);
     ESP_LOGI(TAG, "  Baud: %lu", (unsigned long)cfg->baud);
@@ -500,6 +562,8 @@ esp_err_t crsf_singlewire_stop(void)
     s.should_exit = true;
     for (int i = 0; i < 50 && s.running; i++) vTaskDelay(pdMS_TO_TICKS(10));
     if (s.txq_lock) { vSemaphoreDelete(s.txq_lock); s.txq_lock = NULL; }
+    if (s.out_queue) { vQueueDelete(s.out_queue); s.out_queue = NULL; }
+    s.out_task = NULL;
     uart_driver_delete(s.cfg.port);
     s.task = NULL;
     return ESP_OK;
