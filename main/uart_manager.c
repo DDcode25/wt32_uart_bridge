@@ -547,6 +547,12 @@ esp_err_t uart_manager_apply_config(const uart_mgr_channel_cfg_t *cfg)
             .invert = cfg->invert_rx,
             .tx_push_pull = cfg->tx_push_pull,
             .pull   = (uint8_t)cfg->pull,
+            .tx_queue_frames    = cfg->sw_tx_queue_frames,
+            .tx_max_age_ms      = cfg->sw_tx_max_age_ms,
+            .tx_min_gap_us      = cfg->sw_tx_min_gap_us,
+            .idle_wait_ms       = cfg->sw_idle_wait_ms,
+            .rx_timeout_symbols = cfg->sw_rx_timeout_symbols,
+            .echo_window_ms     = cfg->sw_echo_window_ms,
             /* RAW на одном проводе — тот же физический слой, но мост
              * становится прозрачным: ничего не разбирает и ничего не
              * добавляет от себя. */

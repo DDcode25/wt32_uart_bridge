@@ -36,7 +36,10 @@
 extern "C" {
 #endif
 
-#define CRSF_TXQ_CAPACITY             6
+/* Предел массива — то, что нельзя менять на ходу. Рабочая ёмкость задаётся
+ * настройкой канала и не может его превысить. */
+#define CRSF_TXQ_CAPACITY_MAX        16
+#define CRSF_TXQ_CAPACITY             6   /* по умолчанию */
 #define CRSF_TXQ_DEFAULT_MAX_AGE_MS  40
 
 typedef enum {
@@ -59,14 +62,15 @@ typedef struct {
         uint8_t  data[CRSF_MAX_FRAME_LEN];
         uint8_t  len;
         uint32_t queued_ms;
-    } slot[CRSF_TXQ_CAPACITY];
+    } slot[CRSF_TXQ_CAPACITY_MAX];
     uint8_t  head;              /* индекс самого старого кадра */
     uint8_t  count;
+    uint8_t  capacity;          /* рабочая глубина, <= CRSF_TXQ_CAPACITY_MAX */
     uint32_t max_age_ms;        /* 0 = не устаревать */
     crsf_txq_stats_t stats;
 } crsf_txq_t;
 
-void   crsf_txq_init(crsf_txq_t *q, uint32_t max_age_ms);
+void   crsf_txq_init(crsf_txq_t *q, uint8_t capacity, uint32_t max_age_ms);
 size_t crsf_txq_depth(const crsf_txq_t *q);
 
 /* Поставить кадр в очередь. Кадр ПРОВЕРЯЕТСЯ: в линию не должно уходить

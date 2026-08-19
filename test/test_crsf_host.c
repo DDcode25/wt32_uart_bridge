@@ -307,7 +307,7 @@ static void test_txq(void)
     for (int i = 0; i < CRSF_NUM_CHANNELS; i++) ch[i] = 992;
     size_t n = crsf_build_channels_frame(ch, fr, sizeof(fr));
 
-    crsf_txq_init(&q, 40 /* мс годности */);
+    crsf_txq_init(&q, CRSF_TXQ_CAPACITY, 40 /* мс годности */);
     CHECK(crsf_txq_depth(&q) == 0, "новая очередь пуста");
 
     CHECK(crsf_txq_push(&q, fr, n, 1000) == CRSF_TXQ_OK, "кадр встаёт в очередь");
@@ -326,7 +326,7 @@ static void test_txq(void)
     CHECK(crsf_txq_depth(&q) == 0, "устаревший кадр выброшен из очереди");
 
     /* переполнение вытесняет САМЫЙ СТАРЫЙ */
-    crsf_txq_init(&q, 1000);
+    crsf_txq_init(&q, CRSF_TXQ_CAPACITY, 1000);
     for (int i = 0; i < CRSF_TXQ_CAPACITY; i++) {
         fr[2] = CRSF_FRAMETYPE_RC_CHANNELS_PACKED;
         fr[3] = (uint8_t)i;                       /* метка кадра */
@@ -342,7 +342,7 @@ static void test_txq(void)
     CHECK(out[3] == 1, "вытеснен был самый старый (метка 0), первым идёт 1");
 
     /* мусор в очередь не принимается */
-    crsf_txq_init(&q, 1000);
+    crsf_txq_init(&q, CRSF_TXQ_CAPACITY, 1000);
     uint8_t junk[10] = { 0x11, 0x22, 0x33, 0x44 };
     CHECK(crsf_txq_push(&q, junk, sizeof(junk), 0) == CRSF_TXQ_INVALID,
           "кадр, не прошедший проверку, в очередь не попадает");
@@ -468,7 +468,7 @@ static void test_txq_purge(void)
 {
     printf("== очистка устаревшего без передачи ==\n");
     crsf_txq_t q;
-    crsf_txq_init(&q, 40);
+    crsf_txq_init(&q, CRSF_TXQ_CAPACITY, 40);
     uint16_t ch[CRSF_NUM_CHANNELS];
     for (int i = 0; i < CRSF_NUM_CHANNELS; i++) ch[i] = 992;
     uint8_t fr[32];
@@ -551,6 +551,32 @@ static void test_echo_hist(void)
     CHECK(all, "все посылки из истории узнаются");
 }
 
+static void test_txq_capacity(void)
+{
+    printf("== настраиваемая глубина очереди ==\n");
+    crsf_txq_t q;
+    uint16_t ch[CRSF_NUM_CHANNELS];
+    for (int i = 0; i < CRSF_NUM_CHANNELS; i++) ch[i] = 992;
+    uint8_t fr[32];
+    size_t n = crsf_build_channels_frame(ch, fr, sizeof(fr));
+
+    /* Глубина 2: третий кадр обязан вытеснить первый */
+    crsf_txq_init(&q, 2, 1000);
+    for (int i = 0; i < 2; i++) { fr[3]=(uint8_t)i; fr[n-1]=crsf_crc8_dvb_s2(&fr[2],n-3); crsf_txq_push(&q,fr,n,100); }
+    CHECK(crsf_txq_depth(&q) == 2, "очередь глубиной 2 заполнена двумя");
+    fr[3]=9; fr[n-1]=crsf_crc8_dvb_s2(&fr[2],n-3);
+    CHECK(crsf_txq_push(&q,fr,n,100) == CRSF_TXQ_OVERFLOW, "третий вытесняет");
+    uint8_t out[CRSF_MAX_FRAME_LEN]; size_t ol=0;
+    crsf_txq_pop(&q,100,out,&ol);
+    CHECK(out[3] == 1, "вытеснен самый старый");
+
+    /* Ноль и запредельное значение приводятся к допустимым */
+    crsf_txq_init(&q, 0, 1000);
+    CHECK(q.capacity == 1, "ноль приводится к единице");
+    crsf_txq_init(&q, 250, 1000);
+    CHECK(q.capacity == CRSF_TXQ_CAPACITY_MAX, "запредельное режется до предела массива");
+}
+
 int main(void)
 {
     test_crc();
@@ -564,6 +590,7 @@ int main(void)
     test_udp_split();
     test_txq();
     test_txq_purge();
+    test_txq_capacity();
     test_udp_route();
     test_echo();
     test_retarget();

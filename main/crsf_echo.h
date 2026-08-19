@@ -105,7 +105,8 @@ typedef struct {
         uint8_t  len;          /* 0 — слот свободен */
         uint32_t ms;
     } slot[CRSF_ECHO_HIST_FRAMES];
-    uint8_t next;
+    uint8_t  next;
+    uint32_t window_ms;        /* 0 — взять CRSF_ECHO_HIST_MS */
 } crsf_echo_hist_t;
 
 /* Запомнить кадр, который мы только что отдали в линию. */

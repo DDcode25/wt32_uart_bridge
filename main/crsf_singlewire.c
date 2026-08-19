@@ -79,6 +79,10 @@ static void echo_dump(const uint8_t *data, size_t len)
     if (s_echo_dump_cb && len) s_echo_dump_cb(data, len, s_echo_dump_ctx);
 }
 
+/* Ноль в настройке означает «по умолчанию»: так конфигурация, собранная до
+ * появления этих полей, продолжает работать ровно как раньше. */
+static uint32_t cfg_or(uint32_t v, uint32_t dflt) { return v ? v : dflt; }
+
 static uint32_t now_ms(void) { return (uint32_t)(esp_timer_get_time() / 1000); }
 
 const char *crsf_singlewire_state_name(crsf_sw_state_t st)
@@ -349,7 +353,7 @@ static void service_tx(void)
     /* Ровный такт вместо залпа: между своими посылками выдерживаем паузу,
      * чтобы встречной стороне было куда ответить. */
     int64_t now_us = esp_timer_get_time();
-    if (s.last_tx_us && (now_us - s.last_tx_us) < CRSF_SW_TX_MIN_GAP_US) return;
+    if (s.last_tx_us && (now_us - s.last_tx_us) < (int64_t)cfg_or(s.cfg.tx_min_gap_us, CRSF_SW_TX_MIN_GAP_US)) return;
 
     /* Линия должна быть тихой. Если в буфере уже что-то есть, значит
      * встречная сторона заговорила — лучше промолчать: наш кадр всё равно
@@ -382,7 +386,7 @@ static void crsf_sw_task(void *arg)
         /* Ждём СОБЫТИЕ, а не тикаем таймером: драйвер будит нас, когда
          * данные пришли или когда линия замолчала на CRSF_SW_RX_TIMEOUT_SYMBOLS.
          * Второе и есть аппаратный признак конца кадра. */
-        if (xQueueReceive(s.evt_queue, &evt, pdMS_TO_TICKS(CRSF_SW_IDLE_WAIT_MS)) != pdTRUE) {
+        if (xQueueReceive(s.evt_queue, &evt, pdMS_TO_TICKS(cfg_or(s.cfg.idle_wait_ms, CRSF_SW_IDLE_WAIT_MS))) != pdTRUE) {
             /* Тишина на линии: встречная сторона молчит, синхронизировать
              * не с чем — можно отдать накопленное сразу. */
             service_tx();
@@ -542,7 +546,7 @@ esp_err_t crsf_singlewire_start(const crsf_sw_cfg_t *cfg, crsf_sw_frame_cb_t cb,
     /* Аппаратный признак «линия замолчала» (перенос идеи из uart_dma.cpp).
      * На вклад в ошибки CRC проверен отдельно: с ним и без него 15.5 против
      * 15.5 в секунду, то есть приёму он не вредит, а промежуток даёт. */
-    uart_set_rx_timeout(cfg->port, CRSF_SW_RX_TIMEOUT_SYMBOLS);
+    uart_set_rx_timeout(cfg->port, (uint8_t)cfg_or(cfg->rx_timeout_symbols, CRSF_SW_RX_TIMEOUT_SYMBOLS));
 
     /* Внутренняя подтяжка как ЗАПАСНОЙ вариант.
      *
@@ -564,7 +568,10 @@ esp_err_t crsf_singlewire_start(const crsf_sw_cfg_t *cfg, crsf_sw_frame_cb_t cb,
         return ESP_ERR_NO_MEM;
     }
 
-    crsf_txq_init(&s.txq, CRSF_TXQ_DEFAULT_MAX_AGE_MS);
+    crsf_txq_init(&s.txq,
+                  (uint8_t)cfg_or(cfg->tx_queue_frames, CRSF_TXQ_CAPACITY),
+                  cfg_or(cfg->tx_max_age_ms, CRSF_TXQ_DEFAULT_MAX_AGE_MS));
+    s.echo_hist.window_ms = cfg_or(cfg->echo_window_ms, CRSF_ECHO_HIST_MS);
     s.txq_lock = xSemaphoreCreateMutex();
     if (!s.txq_lock) {
         uart_driver_delete(cfg->port);

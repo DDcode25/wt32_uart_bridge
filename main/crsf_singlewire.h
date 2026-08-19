@@ -154,6 +154,14 @@ typedef struct {
     bool     tx_push_pull;
     uint8_t  pull;               /* 0 вверх, 1 вниз, 2 без подтяжки */
 
+    /* Арбитраж линии; 0 в любом поле — значение по умолчанию. */
+    uint8_t  tx_queue_frames;
+    uint16_t tx_max_age_ms;
+    uint16_t tx_min_gap_us;
+    uint8_t  idle_wait_ms;
+    uint8_t  rx_timeout_symbols;
+    uint16_t echo_window_ms;
+
     /* Прозрачный режим: мост не разбирает кадры, не проверяет CRC, ничего
      * не сочиняет и ни на что не отвечает. Что пришло с провода — уходит в
      * сеть как есть, что пришло из сети — уходит в провод как есть.

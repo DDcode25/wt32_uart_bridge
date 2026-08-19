@@ -4,6 +4,7 @@
 #include <arpa/inet.h>
 #include "config_manager.h"
 #include "board_config.h"
+#include "crsf_txq.h"
 #include "nvs_flash.h"
 #include "nvs.h"
 #include "esp_log.h"
@@ -633,6 +634,12 @@ char *config_manager_to_json(const app_config_t *cfg)
         cJSON_AddNumberToObject(c, "crsf_mode", u->crsf_mode);
         cJSON_AddBoolToObject(c, "tx_push_pull", u->tx_push_pull);
         cJSON_AddNumberToObject(c, "pull", u->pull);
+        cJSON_AddNumberToObject(c, "sw_tx_queue_frames", u->sw_tx_queue_frames);
+        cJSON_AddNumberToObject(c, "sw_tx_max_age_ms", u->sw_tx_max_age_ms);
+        cJSON_AddNumberToObject(c, "sw_tx_min_gap_us", u->sw_tx_min_gap_us);
+        cJSON_AddNumberToObject(c, "sw_idle_wait_ms", u->sw_idle_wait_ms);
+        cJSON_AddNumberToObject(c, "sw_rx_timeout_symbols", u->sw_rx_timeout_symbols);
+        cJSON_AddNumberToObject(c, "sw_echo_window_ms", u->sw_echo_window_ms);
         cJSON_AddStringToObject(c, "crsf_mode_name", uart_manager_crsf_mode_name(u->crsf_mode));
         cJSON_AddNumberToObject(c, "rx_watchdog_timeout_ms", u->rx_watchdog_timeout_ms);
         cJSON_AddBoolToObject(c, "enabled", u->enabled);
@@ -764,6 +771,23 @@ esp_err_t config_manager_from_json(const char *json, app_config_t *out)
             u->tx_push_pull = json_bool(c, "tx_push_pull", u->tx_push_pull);
             int pl = json_int(c, "pull", u->pull);
             if (pl >= UART_MGR_PULL_UP && pl <= UART_MGR_PULL_NONE) u->pull = pl;
+
+            /* Границы намеренно широкие: это отладочные рычаги, и запрещать
+             * заведомо плохие значения незачем — важно лишь не дать выйти за
+             * пределы типов и массивов. Ноль везде означает «по умолчанию». */
+            int v;
+            v = json_int(c, "sw_tx_queue_frames", u->sw_tx_queue_frames);
+            if (v >= 0 && v <= CRSF_TXQ_CAPACITY_MAX) u->sw_tx_queue_frames = (uint8_t)v;
+            v = json_int(c, "sw_tx_max_age_ms", u->sw_tx_max_age_ms);
+            if (v >= 0 && v <= 10000) u->sw_tx_max_age_ms = (uint16_t)v;
+            v = json_int(c, "sw_tx_min_gap_us", u->sw_tx_min_gap_us);
+            if (v >= 0 && v <= 60000) u->sw_tx_min_gap_us = (uint16_t)v;
+            v = json_int(c, "sw_idle_wait_ms", u->sw_idle_wait_ms);
+            if (v >= 0 && v <= 250) u->sw_idle_wait_ms = (uint8_t)v;
+            v = json_int(c, "sw_rx_timeout_symbols", u->sw_rx_timeout_symbols);
+            if (v >= 0 && v <= 126) u->sw_rx_timeout_symbols = (uint8_t)v;
+            v = json_int(c, "sw_echo_window_ms", u->sw_echo_window_ms);
+            if (v >= 0 && v <= 10000) u->sw_echo_window_ms = (uint16_t)v;
 
             int cm = json_int(c, "crsf_mode", u->crsf_mode);
             if (cm >= CRSF_MODE_RX_ONLY_SPORT && cm <= CRSF_MODE_FULL_DUPLEX) u->crsf_mode = cm;

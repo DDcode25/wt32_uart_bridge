@@ -63,7 +63,8 @@ bool crsf_echo_hist_take(crsf_echo_hist_t *h, const uint8_t *frame, size_t len, 
         if (h->slot[i].len != len) continue;
         /* Разность знаковая: переполнение счётчика миллисекунд не должно
          * превращать свежую запись в просроченную. */
-        if ((int32_t)(now_ms - h->slot[i].ms) > CRSF_ECHO_HIST_MS) continue;
+        uint32_t win = h->window_ms ? h->window_ms : CRSF_ECHO_HIST_MS;
+        if ((int32_t)(now_ms - h->slot[i].ms) > (int32_t)win) continue;
         if (memcmp(h->slot[i].data, frame, len) != 0) continue;
         h->slot[i].len = 0;      /* изымаем: одна посылка — одно совпадение */
         return true;
