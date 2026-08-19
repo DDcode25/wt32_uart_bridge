@@ -551,6 +551,8 @@ function render(){
        адреса призначення <select id="c${c.channel_id}_daddr">${
          [[0,'не чіпати'],[234,'0xEA пульт'],[238,'0xEE модуль'],[200,'0xC8 політ. контролер'],[236,'0xEC приймач']]
          .map(x=>`<option value="${x[0]}"${x[0]===(c.crsf_dest_addr||0)?' selected':''}>${x[1]}</option>`).join('')}</select></label>
+     <label style="flex:0 0 auto" title="Типово мостить у дріт ЛИШЕ цілі кадри, що пройшли перевірку довжини та CRC; хвіст, який не склався, відкидається й рахується (crsf_from_net.bad_bytes). Половина кадру на спільній шині — це зайнята лінія та сміття на зустрічному боці. Знімайте галочку тільки щоб зробити міст прозорим і відокремити «збоїть зустрічний бік» від «ми щось відкидаємо»: те, що не пройшло CRC, не стане справним від того, що ми його передамо">
+       <input type="checkbox" id="c${c.channel_id}_chk" ${c.net_to_uart_unchecked?'':'checked'}> перевіряти кадри перед записом у дріт</label>
      <label style="flex:0 0 auto" title="Верхня межа темпу кадрів, що йдуть із мережі В ДРІТ. 0 — без обмеження. Сенс у тому, щоб рідше займати лінію: пульту вистачає одиниць кадрів на секунду, а приходить їх близько тринадцяти. УВАГА: обмежувач не розбирає, що саме викидає — на каналі, яким у дріт іде КЕРУВАННЯ, він викине команди RC">
        темп у дріт <input type="number" id="c${c.channel_id}_hz" min="0" max="1000"
               value="${c.crsf_to_uart_max_hz||0}" style="width:64px"> кадр/с</label>
@@ -620,6 +622,7 @@ function collect(){
     }
     if(g('c'+i+'_u2n')){c.uart_to_net=g('c'+i+'_u2n').checked;c.net_to_uart=g('c'+i+'_n2u').checked;}
     if(g('c'+i+'_tnet')){c.crsf_test_to_net=g('c'+i+'_tnet').checked;c.crsf_test_to_uart=g('c'+i+'_tuart').checked;}
+    if(g('c'+i+'_chk'))c.net_to_uart_unchecked=!g('c'+i+'_chk').checked;
     if(g('c'+i+'_daddr'))c.crsf_dest_addr=+g('c'+i+'_daddr').value;
     if(g('c'+i+'_hz'))c.crsf_to_uart_max_hz=Math.min(Math.max(+g('c'+i+'_hz').value||0,0),1000);
     // Нуль вимикає утримання, тому знята галочка і є вимкненням: саме

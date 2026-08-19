@@ -19,7 +19,9 @@
 extern "C" {
 #endif
 
-/* Версия 7: в uart_mgr_channel_cfg_t добавлены параметры арбитража
+/* Версия 8: в routing_cfg_t добавлен net_to_uart_unchecked — пропуск
+ * байтов в провод без проверки кадра.
+ * Версия 7: в uart_mgr_channel_cfg_t добавлены параметры арбитража
  * общего провода (очередь, паузы, окно эха).
  * Версия 6: в uart_mgr_channel_cfg_t добавлены tx_push_pull и pull —
  * электрика вывода на общем проводе.
@@ -36,7 +38,7 @@ extern "C" {
  * сохранённые настройки молча заменяются заводскими. Один раз это уже
  * стоило потерянных настроек канала на живой плате — новое поле поехало
  * в прошивку без бампа, и после OTA пины вернулись к заводским. */
-#define CONFIG_SCHEMA_VERSION   7
+#define CONFIG_SCHEMA_VERSION   8
 #define CONFIG_WEB_USER_LEN     24
 #define CONFIG_PWHASH_LEN       32   /* SHA-256 */
 #define CONFIG_SALT_LEN         16

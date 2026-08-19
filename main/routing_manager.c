@@ -197,9 +197,16 @@ static void on_net_rx(uint8_t channel_id, const uint8_t *data, size_t len, void 
              * crsf_split_frames() режет пакет на целые кадры и отдаёт
              * каждый; хвост, не собравшийся в кадр, в линию не идёт вовсе
              * и учитывается как брак. */
-            size_t bad = 0;
-            crsf_split_frames(data, len, &bad, net_frame_to_uart, rt);
-            rt->net_bad_bytes += (uint32_t)bad;
+            if (rt->cfg.net_to_uart_unchecked) {
+                /* Прозрачно: байты в провод как пришли, без разбора и без
+                 * проверок. Нужно, чтобы отделить «сбоит встречная сторона»
+                 * от «мы что-то отбрасываем»; на боевой связке не нужно. */
+                passthrough_to_uart(channel_id, data, len, NULL);
+            } else {
+                size_t bad = 0;
+                crsf_split_frames(data, len, &bad, net_frame_to_uart, rt);
+                rt->net_bad_bytes += (uint32_t)bad;
+            }
 
             /* Окно удержания отсчитывается от СВЕЖИХ данных, поэтому
              * засчитываем только реально разобранный кадр статистики, а
