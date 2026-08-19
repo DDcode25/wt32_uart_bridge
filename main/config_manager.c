@@ -631,6 +631,8 @@ char *config_manager_to_json(const app_config_t *cfg)
         cJSON_AddNumberToObject(c, "rs485_re_gpio", u->rs485_re_gpio);
         cJSON_AddNumberToObject(c, "protocol", u->protocol);
         cJSON_AddNumberToObject(c, "crsf_mode", u->crsf_mode);
+        cJSON_AddBoolToObject(c, "tx_push_pull", u->tx_push_pull);
+        cJSON_AddNumberToObject(c, "pull", u->pull);
         cJSON_AddStringToObject(c, "crsf_mode_name", uart_manager_crsf_mode_name(u->crsf_mode));
         cJSON_AddNumberToObject(c, "rx_watchdog_timeout_ms", u->rx_watchdog_timeout_ms);
         cJSON_AddBoolToObject(c, "enabled", u->enabled);
@@ -758,6 +760,10 @@ esp_err_t config_manager_from_json(const char *json, app_config_t *out)
 
             int proto = json_int(c, "protocol", u->protocol);
             if (proto >= 0 && proto < PROTO_MODE_MAX) u->protocol = proto;
+
+            u->tx_push_pull = json_bool(c, "tx_push_pull", u->tx_push_pull);
+            int pl = json_int(c, "pull", u->pull);
+            if (pl >= UART_MGR_PULL_UP && pl <= UART_MGR_PULL_NONE) u->pull = pl;
 
             int cm = json_int(c, "crsf_mode", u->crsf_mode);
             if (cm >= CRSF_MODE_RX_ONLY_SPORT && cm <= CRSF_MODE_FULL_DUPLEX) u->crsf_mode = cm;

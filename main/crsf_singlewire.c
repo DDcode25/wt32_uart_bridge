@@ -144,7 +144,7 @@ const char *crsf_singlewire_state_name(crsf_sw_state_t st)
  * слову, тоже ничего не прибивает гвоздями: у них это опции порта
  * (SERIAL_BIDIR_PP, SERIAL_PULL_*), и правильный вывод из их кода — не
  * «делай так», а «дай это настроить». */
-static bool line_push_pull(void) { return false; }
+static bool line_push_pull(void) { return s.cfg.tx_push_pull; }
 
 static void line_to_tx(void)
 {
@@ -177,7 +177,10 @@ static void line_to_rx(void)
  * 400000 бод работают на грани. */
 static void line_set_pull(void)
 {
-    gpio_set_pull_mode((gpio_num_t)s.cfg.gpio, GPIO_PULLUP_ONLY);
+    gpio_pull_mode_t m = GPIO_PULLUP_ONLY;
+    if (s.cfg.pull == 1) m = GPIO_PULLDOWN_ONLY;
+    else if (s.cfg.pull == 2) m = GPIO_FLOATING;
+    gpio_set_pull_mode((gpio_num_t)s.cfg.gpio, m);
 }
 
 /* Кадр с провода: отдаём наружу целиком и без изменений.

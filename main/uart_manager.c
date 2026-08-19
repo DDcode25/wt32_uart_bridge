@@ -545,6 +545,8 @@ esp_err_t uart_manager_apply_config(const uart_mgr_channel_cfg_t *cfg)
              * Для прямого CRSF TTL она выключена; включать её нужно только
              * при внешнем инверторе. */
             .invert = cfg->invert_rx,
+            .tx_push_pull = cfg->tx_push_pull,
+            .pull   = (uint8_t)cfg->pull,
             /* RAW на одном проводе — тот же физический слой, но мост
              * становится прозрачным: ничего не разбирает и ничего не
              * добавляет от себя. */

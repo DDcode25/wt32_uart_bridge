@@ -344,6 +344,7 @@ function syncOneWire(id){
   }
 
   const one=(+dup.value===1);
+  const elrow=el('c'+id+'_elrow'); if(elrow)elrow.style.display=one?'':'none';
   rxrow.style.display=one?'none':'';
   txlbl.textContent=one?'CRSF GPIO (один провід)':'TX GPIO';
   if(one){const rx=el('c'+id+'_rx'),tx=el('c'+id+'_tx');if(rx&&tx)rx.value=tx.value;}
@@ -452,6 +453,10 @@ function uartForm(c){
   <div class="row" id="c${id}_cmrow"><label>Режим CRSF</label><select id="c${id}_cmode" onchange="syncOneWire(${id})">${opts(CRSFMODES,c.crsf_mode||0)}</select></div>
   <div class="row"><span class="hint" id="c${id}_cmhint"></span></div>
   <div class="row"><label>Дуплекс</label><select id="c${id}_dup" onchange="syncOneWire(${id})">${opts(DUPLEX,c.duplex)}</select></div>
+  <div class="row" id="c${id}_elrow"><label>Вихід на спільному дроті</label>
+    <select id="c${id}_pp">${[[0,'відкритий стік'],[1,'двотактний']].map(x=>`<option value="${x[0]}"${x[0]===(c.tx_push_pull?1:0)?' selected':''}>${x[1]}</option>`).join('')}</select>
+    <select id="c${id}_pull">${[[0,'підтяжка вгору'],[1,'підтяжка вниз'],[2,'без підтяжки']].map(x=>`<option value="${x[0]}"${x[0]===(c.pull||0)?' selected':''}>${x[1]}</option>`).join('')}</select></div>
+  <div class="row"><span class="hint">Діє лише в однодротовому режимі. Типово — відкритий стік і підтяжка вгору: на лінії пульта це вимірюється найкраще (45% спотвореного відлуння при НУЛІ помилок приймання). Двотактний формує обидва фронти сам, але за одночасної передачі двох кінців виходи боротимуться. Підтяжка має збігатися з рівнем спокою ЛІНІЇ. Зовнішній резистор 1–4.7 кОм надійніший за внутрішні ~45 кОм.</span></div>
   <div class="row"><label>RS-485 DE GPIO</label><input type="number" id="c${id}_de" value="${c.rs485_de_gpio}" min="-1" max="33"></div>
   <div class="row"><label>RS-485 /RE GPIO</label><input type="number" id="c${id}_re" value="${c.rs485_re_gpio}" min="-1" max="33"></div>
   <div class="row"><span class="hint">-1 = не використовується. Не під’єднуйте RS-485 напряму до GPIO, потрібен трансивер.</span></div>
@@ -547,6 +552,8 @@ function collect(){
     c.data_bits=+g('c'+i+'_db').value; c.parity=+g('c'+i+'_par').value; c.stop_bits=+g('c'+i+'_sb').value;
     c.invert_rx=g('c'+i+'_irx').checked; c.invert_tx=g('c'+i+'_itx').checked;
     c.duplex=+g('c'+i+'_dup').value;
+    if(g('c'+i+'_pp'))c.tx_push_pull=+g('c'+i+'_pp').value===1;
+    if(g('c'+i+'_pull'))c.pull=+g('c'+i+'_pull').value;
     c.rs485_de_gpio=+g('c'+i+'_de').value; c.rs485_re_gpio=+g('c'+i+'_re').value;
     c.rx_watchdog_timeout_ms=+g('c'+i+'_wd').value;
     c.net_mode=+g('c'+i+'_mode').value;

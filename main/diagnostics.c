@@ -356,6 +356,10 @@ char *diagnostics_status_json(void)
         cJSON_AddNumberToObject(c, "duplex", ucfg.duplex);
         cJSON_AddBoolToObject(c, "invert_rx", ucfg.invert_rx);
         cJSON_AddBoolToObject(c, "invert_tx", ucfg.invert_tx);
+        if (ucfg.duplex == UART_DUPLEX_HALF_SINGLE_WIRE) {
+            cJSON_AddBoolToObject(c, "tx_push_pull", ucfg.tx_push_pull);
+            cJSON_AddNumberToObject(c, "pull", ucfg.pull);
+        }
         if (ucfg.protocol == PROTO_MODE_CRSF) {
             cJSON_AddNumberToObject(c, "crsf_mode", ucfg.crsf_mode);
             cJSON_AddStringToObject(c, "crsf_mode_name",
