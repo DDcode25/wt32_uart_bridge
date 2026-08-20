@@ -4,7 +4,7 @@
 
 /* CRC покрывает TYPE+PAYLOAD и адрес не включает, поэтому принимать
  * несколько адресов безопасно — проверка целостности не меняется. */
-static bool crsf_addr_known(uint8_t b)
+bool crsf_addr_is_known(uint8_t b)
 {
     /* Список destination-адресов, которые реально бывают началом кадра на
      * линии «пульт — модуль — приёмник — полётный контроллер», плюс
@@ -22,11 +22,45 @@ static bool crsf_addr_known(uint8_t b)
      * начала (см. parser_scan), а не сбрасывает буфер, поэтому настоящий
      * кадр внутри мусора больше не теряется и broadcast принимать
      * безопасно. */
-    return b == CRSF_ADDR_FLIGHT_CONTROLLER ||
-           b == CRSF_ADDR_CRSF_TRANSMITTER  ||
-           b == CRSF_ADDR_RADIO_TRANSMITTER ||
-           b == CRSF_ADDR_RECEIVER          ||
-           b == CRSF_ADDR_BROADCAST;
+    switch (b) {
+        /* Таблица "Device Addresses" спецификации TBS целиком, КРОМЕ
+         * динамического диапазона NAT 0x20-0x7F.
+         *
+         * Спецификация разрешает в качестве первого байта любой адрес
+         * устройства, а мы принимали пять. Всё остальное — датчик тока,
+         * GPS, VTX, OSD, регуляторы — отбрасывалось как мусор, и мост,
+         * который называется универсальным, не пропускал половину шины.
+         *
+         * NAT-диапазон оставлен за бортом сознательно: 0x20-0x7F — это
+         * вся печатная ASCII, и на грязном проводе такие байты идут
+         * потоком. Цена ложного начала невелика (откат на байт), но
+         * счётчики от этого слепнут, а выигрыша нет: адреса оттуда
+         * раздаются динамически и на прямой линии пульт-модуль не
+         * встречаются. */
+        case CRSF_ADDR_BROADCAST:          /* 0x00 */
+        case 0x0E:                         /* Cloud */
+        case 0x10:                         /* USB Device */
+        case 0x12:                         /* Bluetooth / WiFi */
+        case 0x13:                         /* WiFi receiver (симулятор) */
+        case 0x14:                         /* Video Receiver */
+        case 0x80:                         /* OSD / TBS CORE PNP PRO */
+        case 0x90: case 0x91: case 0x92: case 0x93:   /* ESC 1..4 */
+        case 0x94: case 0x95: case 0x96: case 0x97:   /* ESC 5..8 */
+        case 0xC0:                         /* датчик напряжения/тока */
+        case 0xC2:                         /* GPS */
+        case 0xC4:                         /* TBS Blackbox */
+        case CRSF_ADDR_FLIGHT_CONTROLLER:  /* 0xC8 */
+        case 0xCC:                         /* Race tag */
+        case 0xCE:                         /* VTX */
+        case CRSF_ADDR_RADIO_TRANSMITTER:  /* 0xEA */
+        case 0xEB:                         /* Repeater Receiver */
+        case CRSF_ADDR_RECEIVER:           /* 0xEC */
+        case 0xED:                         /* Repeater Transmitter Module */
+        case CRSF_ADDR_CRSF_TRANSMITTER:   /* 0xEE */
+            return true;
+        default:
+            return false;
+    }
 }
 
 /* CRC8 DVB-S2 (полином 0xD5) таблицей.
@@ -177,8 +211,14 @@ static void count_type(crsf_parser_t *p, uint8_t type)
     p->state.type_slots_overflow++;
 }
 
-/* Возвращает true, если кадр прошёл CRC и разобран. */
-static bool process_frame(crsf_parser_t *p, const uint8_t *frame, size_t frame_len)
+/* Возвращает true, если кадр прошёл CRC и разобран.
+ *
+ * in_sync говорит, стоим ли мы на границе кадра. Несовпадение CRC значит
+ * разные вещи в двух случаях: на границе это ИСПОРЧЕННЫЙ кадр, а посреди
+ * поиска — просто байт, который кадром не оказался. Складывать их в один
+ * счётчик нельзя, см. parser_scan(). */
+static bool process_frame(crsf_parser_t *p, const uint8_t *frame, size_t frame_len,
+                          bool in_sync)
 {
     /* frame: [LEN][TYPE][PAYLOAD...][CRC8]  (без SYNC, он уже снят) */
     uint8_t len = frame[0];
@@ -189,7 +229,8 @@ static bool process_frame(crsf_parser_t *p, const uint8_t *frame, size_t frame_l
 
     uint8_t calc_crc = crsf_crc8_dvb_s2(&frame[1], len - 1); /* TYPE+PAYLOAD, без CRC */
     if (calc_crc != received_crc) {
-        p->state.crc_errors++;
+        if (in_sync) p->state.crc_errors++;
+        else         p->state.sync_errors++;
         return false;
     }
 
@@ -266,8 +307,9 @@ static void parser_scan(crsf_parser_t *p, uint8_t channel_id,
     size_t pos = 0;   /* начало кандидата в буфере */
 
     while (pos < p->buf_len) {
-        if (!crsf_addr_known(p->buf[pos])) {
+        if (!crsf_addr_is_known(p->buf[pos])) {
             p->state.sync_errors++;
+            p->in_sync = false;
             pos++;
             continue;
         }
@@ -291,10 +333,23 @@ static void parser_scan(crsf_parser_t *p, uint8_t channel_id,
              * настоящая ошибка длины в таком шуме уже не видна.
              *
              * Поэтому ложное начало по broadcast — это ошибка поиска
-             * начала кадра, а ошибка длины остаётся за адресами, которые
-             * в данных случайно не встречаются. */
-            if (p->buf[pos] == CRSF_ADDR_BROADCAST) p->state.sync_errors++;
-            else                                    p->state.short_or_long_frame_errors++;
+             * начала кадра, а не ошибка длины.
+             *
+             * Второе условие — in_sync. Ошибка длины что-то значит только
+             * там, где мы стоим на ГРАНИЦЕ кадра: предыдущий кадр кончился
+             * ровно здесь, значит здесь обязан начаться следующий, и кривая
+             * длина — это порча. Посреди поиска начала мы вообще не знаем,
+             * кадр перед нами или совпавший байт, и записывать такое в
+             * порчу нельзя.
+             *
+             * Без этого различения нельзя было расширить список адресов:
+             * каждый новый принимаемый байт-адрес добавлял бы ложных
+             * «ошибок длины» ровно там, где никакой порчи нет. */
+            if (p->in_sync && p->buf[pos] != CRSF_ADDR_BROADCAST)
+                p->state.short_or_long_frame_errors++;
+            else
+                p->state.sync_errors++;
+            p->in_sync = false;
             pos++;                                    /* ложное начало */
             continue;
         }
@@ -310,11 +365,13 @@ static void parser_scan(crsf_parser_t *p, uint8_t channel_id,
         uint8_t prev_addr = p->state.last_addr;
         p->state.last_addr = p->buf[pos];
 
-        if (process_frame(p, &p->buf[pos + 1], declared)) {
+        if (process_frame(p, &p->buf[pos + 1], declared, p->in_sync)) {
             if (frame_cb) frame_cb(channel_id, &p->buf[pos], total, cb_ctx);
+            p->in_sync = true;          /* стоим ровно на границе кадра */
             pos += total;
         } else {
             p->state.last_addr = prev_addr;
+            p->in_sync = false;
             pos++;   /* CRC не сошёлся — это было не начало кадра */
         }
     }
@@ -351,6 +408,7 @@ void crsf_parser_feed_at(crsf_parser_t *p, uint32_t now_us,
         (int32_t)(now_us - p->last_feed_us) > (int32_t)p->gap_us) {
         p->state.stale_drops++;
         p->buf_len = 0;
+        p->in_sync = false;   /* выброшенный хвост — потерянная граница */
     }
     p->last_feed_us = now_us;
 
@@ -381,7 +439,7 @@ void crsf_parser_feed(crsf_parser_t *p, uint8_t channel_id, const uint8_t *data,
 size_t crsf_frame_check(const uint8_t *frame, size_t len)
 {
     if (!frame || len < 4 || len > CRSF_MAX_FRAME_LEN) return 0;
-    if (!crsf_addr_known(frame[0])) return 0;
+    if (!crsf_addr_is_known(frame[0])) return 0;
 
     uint8_t declared = frame[1];
     if (declared < 2 || declared > CRSF_MAX_FRAME_LEN - 2) return 0;
@@ -450,7 +508,7 @@ size_t crsf_split_frames(const uint8_t *data, size_t len, size_t *bad_bytes,
         if (rest < 4) { bad += rest; break; }
 
         size_t n = 0;
-        if (crsf_addr_known(data[pos])) {
+        if (crsf_addr_is_known(data[pos])) {
             uint8_t declared = data[pos + 1];
             size_t total = (size_t)declared + 2;
             if (declared >= 2 && declared <= CRSF_MAX_FRAME_LEN - 2 && total <= rest) {

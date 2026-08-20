@@ -7,6 +7,7 @@
 #include "crsf_txq.h"
 #include "crsf_singlewire.h"
 #include "crsf_echo.h"
+#include "protocol_crsf.h"
 #include "nvs_flash.h"
 #include "nvs.h"
 #include "esp_log.h"
@@ -865,12 +866,15 @@ esp_err_t config_manager_from_json(const char *json, app_config_t *out)
             int hold = json_int(c, "telemetry_hold_ms", (int)out->routing[id].telemetry_hold_ms);
             if (hold >= 0 && hold <= 10000) out->routing[id].telemetry_hold_ms = (uint16_t)hold;
 
-            /* 0 — не трогать адрес. Прочие значения принимаются только из
-             * списка стандартных получателей: произвольный байт в этом поле
-             * означал бы кадры, адресованные несуществующему устройству. */
+            /* 0 — не трогать адрес. Прочие значения принимаются из таблицы
+             * адресов спецификации: произвольный байт в этом поле означал бы
+             * кадры, адресованные несуществующему устройству.
+             *
+             * Раньше список был вчетверо короче и не пускал, например,
+             * 0xCE VTX или 0xC0 датчик тока — те самые устройства, ради
+             * которых переадресация и нужна. */
             int da = json_int(c, "crsf_dest_addr", out->routing[id].crsf_dest_addr);
-            if (da == 0 || da == CRSF_ADDR_RADIO_TRANSMITTER || da == CRSF_ADDR_CRSF_TRANSMITTER ||
-                da == CRSF_ADDR_FLIGHT_CONTROLLER || da == CRSF_ADDR_RECEIVER) {
+            if (da >= 0 && da <= 0xFF && (da == 0 || crsf_addr_is_known((uint8_t)da))) {
                 out->routing[id].crsf_dest_addr = (uint8_t)da;
             }
 

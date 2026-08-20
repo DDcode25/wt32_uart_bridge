@@ -161,12 +161,31 @@ static void test_invalid_length(void)
      * добавят своих ошибок длины — проверять надо один разбор, а не
      * цепочку. */
     uint8_t bad[] = { CRSF_ADDR_FLIGHT_CONTROLLER, 0xFF, 0x16, 0x11, 0x22 };
+
+    /* Порча считается порчей только на ГРАНИЦЕ кадра. На холодном парсере
+     * границы ещё нет: мы влезли в поток посреди, и кривая длина здесь —
+     * промах поиска начала, а не испорченный кадр. */
     crsf_parser_feed(&p, 0, bad, sizeof(bad), cap_cb, NULL);
     CHECK(cap_n == 0, "кадр с длиной 0xFF наружу не уходит");
-    CHECK(p.state.short_or_long_frame_errors == 1, "учтён как ошибка длины");
+    CHECK(p.state.short_or_long_frame_errors == 0 && p.state.sync_errors > 0,
+          "на холодном парсере это промах поиска, не ошибка длины");
+
+    /* А вот сразу после целого кадра граница известна, и та же кривая
+     * длина — уже порча. */
+    crsf_parser_t p1; crsf_parser_init(&p1);
+    uint16_t chv[CRSF_NUM_CHANNELS];
+    for (int i = 0; i < CRSF_NUM_CHANNELS; i++) chv[i] = 992;
+    uint8_t good[32];
+    size_t gn = crsf_build_channels_frame(chv, good, sizeof(good));
+    cap_reset();
+    crsf_parser_feed(&p1, 0, good, gn, cap_cb, NULL);
+    CHECK(cap_n == 1, "первый кадр принят и дал границу");
+    crsf_parser_feed(&p1, 0, bad, sizeof(bad), cap_cb, NULL);
+    CHECK(p1.state.short_or_long_frame_errors == 1, "учтён как ошибка длины");
 
     crsf_parser_t p2; crsf_parser_init(&p2);
     uint8_t tiny[] = { CRSF_ADDR_FLIGHT_CONTROLLER, 0x01, 0x16, 0x11 };
+    crsf_parser_feed(&p2, 0, good, gn, cap_cb, NULL);
     crsf_parser_feed(&p2, 0, tiny, sizeof(tiny), cap_cb, NULL);
     CHECK(p2.state.short_or_long_frame_errors == 1, "длина 1 тоже отвергнута");
 
@@ -193,10 +212,23 @@ static void test_invalid_crc(void)
 
     crsf_parser_t p; crsf_parser_init(&p);
     cap_reset();
+    /* Как и с длиной: битый CRC — это порча только тогда, когда мы знали,
+     * что здесь начинается кадр. Даём сначала целый кадр, чтобы граница
+     * появилась. */
+    uint8_t good[32];
+    size_t gn = crsf_build_channels_frame(ch, good, sizeof(good));
+    crsf_parser_feed(&p, 0, good, gn, cap_cb, NULL);
+    CHECK(cap_n == 1, "целый кадр принят");
     crsf_parser_feed(&p, 0, fr, n, cap_cb, NULL);
-    CHECK(cap_n == 0, "кадр с битым CRC наружу не уходит");
+    CHECK(cap_n == 1, "кадр с битым CRC наружу не уходит");
     CHECK(p.state.crc_errors == 1, "учтена ровно одна ошибка CRC");
     CHECK(crsf_frame_check(fr, n) == 0, "crsf_frame_check тоже отвергает");
+
+    /* На холодном парсере тот же кадр — промах поиска. */
+    crsf_parser_t p2; crsf_parser_init(&p2);
+    crsf_parser_feed(&p2, 0, fr, n, cap_cb, NULL);
+    CHECK(p2.state.crc_errors == 0 && p2.state.sync_errors > 0,
+          "без границы битый CRC идёт в поиск начала, не в порчу");
 }
 
 static void test_resync(void)
@@ -510,6 +542,40 @@ static void test_retarget(void)
     CHECK(bad[0] == CRSF_ADDR_FLIGHT_CONTROLLER, "и остаётся нетронутым");
 }
 
+static void test_addr_table(void)
+{
+    printf("== таблица адресов ==\n");
+
+    /* Спецификация разрешает первым байтом любой адрес устройства. Раньше
+     * принималось пять, и кадры датчика тока, GPS или VTX отбрасывались
+     * как мусор. */
+    const uint8_t known[] = { 0x00, 0x0E, 0x10, 0x12, 0x13, 0x14, 0x80,
+                              0x90, 0x93, 0x97, 0xC0, 0xC2, 0xC4, 0xC8,
+                              0xCC, 0xCE, 0xEA, 0xEB, 0xEC, 0xED, 0xEE };
+    int ok = 1;
+    for (size_t i = 0; i < sizeof(known); i++)
+        if (!crsf_addr_is_known(known[i])) ok = 0;
+    CHECK(ok, "вся таблица адресов спецификации принимается");
+
+    /* Динамический диапазон NAT — это вся печатная ASCII; на грязном
+     * проводе такие байты идут потоком, и пускать их в кандидаты дорого. */
+    CHECK(!crsf_addr_is_known(0x20) && !crsf_addr_is_known('A') &&
+          !crsf_addr_is_known(0x7F), "диапазон NAT 0x20-0x7F не принимается");
+    CHECK(!crsf_addr_is_known(0xFF) && !crsf_addr_is_known(0xB0) &&
+          !crsf_addr_is_known(0x8A), "зарезервированные и мусорные — нет");
+
+    /* Кадр от датчика тока проходит насквозь: раньше он терялся целиком. */
+    uint8_t pl[8] = { 0x04, 0x1A, 0x00, 0x64, 0x00, 0x00, 0x2A, 0x63 };
+    uint8_t fr[32];
+    size_t n = mkframe(0xC0, CRSF_FRAMETYPE_BATTERY_SENSOR, pl, sizeof(pl), fr);
+    crsf_parser_t p; crsf_parser_init(&p);
+    cap_reset();
+    crsf_parser_feed(&p, 0, fr, n, cap_cb, NULL);
+    CHECK(cap_n == 1 && cap[0].len == n, "кадр с адресом 0xC0 прошёл наружу");
+    CHECK(p.state.last_addr == 0xC0, "адрес запомнен");
+    CHECK(crsf_frame_check(fr, n) == n, "и проверка целого кадра его берёт");
+}
+
 static void test_extended_header(void)
 {
     printf("== расширенный заголовок ==\n");
@@ -720,6 +786,7 @@ int main(void)
     test_udp_route();
     test_echo();
     test_retarget();
+    test_addr_table();
     test_extended_header();
     test_retarget_extended();
     test_echo_hist();
