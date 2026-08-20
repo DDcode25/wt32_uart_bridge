@@ -133,6 +133,9 @@ typedef struct {
     uint32_t out_queue_drops;
     uint32_t echo_mismatches;    /* своё эхо вернулось искажённым */
     uint32_t pings_answered;     /* опросов устройств, на которые мы ответили */
+    /* Опросы, адресованные не нам: отвечать на них значит бить в чужой
+     * слот. Растёт только там, где на линии есть третье устройство. */
+    uint32_t pings_ignored;
     uint32_t rx_to_tx_switches;
     uint32_t tx_to_rx_switches;
     uint32_t last_rx_ms;

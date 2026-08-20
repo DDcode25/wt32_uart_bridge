@@ -214,9 +214,28 @@ static void on_frame(uint8_t channel_id, const uint8_t *frame, size_t len, void 
     s.stats.last_rx_ms = now_ms();
 
     if (!s.cfg.raw && len >= 3 && frame[2] == CRSF_FRAMETYPE_DEVICE_PING) {
-        uint8_t info[CRSF_MAX_FRAME_LEN];
-        size_t n = crsf_build_device_info_frame(info, sizeof(info));
-        if (n && crsf_singlewire_send_frame(info, n) == ESP_OK) s.stats.pings_answered++;
+        /* Отвечать надо не на всякий опрос, а только на свой.
+         *
+         * PING_DEVICES — кадр с РАСШИРЕННЫМ заголовком, адрес назначения
+         * лежит в payload. Спецификация (0x28 Parameter Ping Devices):
+         * хост опрашивает либо конкретное устройство по его адресу, либо
+         * все сразу по broadcast 0x00.
+         *
+         * Раньше проверялся только тип, и мост отвечал на любой опрос. На
+         * линии из двух устройств это незаметно, но стоит появиться
+         * третьему — опрос, адресованный ему, получает и наш ответ: мы
+         * бьём в его слот и представляемся вместо него. */
+        uint8_t dest = 0;
+        bool ext = crsf_frame_ext_addrs(frame, len, &dest, NULL);
+        if (ext && (dest == CRSF_ADDR_SELF || dest == CRSF_ADDR_BROADCAST)) {
+            uint8_t info[CRSF_MAX_FRAME_LEN];
+            size_t n = crsf_build_device_info_frame(info, sizeof(info));
+            if (n && crsf_singlewire_send_frame(info, n) == ESP_OK) s.stats.pings_answered++;
+        } else {
+            /* Опрос чужому устройству — или кадр без заголовка, который
+             * разобрать как опрос нельзя. Молчим и считаем. */
+            s.stats.pings_ignored++;
+        }
     }
 
     /* Наружу отдаём ЧЕРЕЗ ОЧЕРЕДЬ, а не отсюда.

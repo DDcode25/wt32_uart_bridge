@@ -34,6 +34,7 @@ typedef struct {
 
     /* Скольким кадрам сменили адрес назначения по дороге в провод. */
     uint32_t crsf_retargeted;
+    uint32_t crsf_retarget_ext_skipped;
 
     /* Ограничитель темпа: когда пропустили последний кадр и сколько
      * выбросили. */
@@ -148,6 +149,13 @@ static void net_frame_to_uart(const uint8_t *frame, size_t len, void *ctx)
         if (crsf_frame_retarget(buf, len, rt->cfg.crsf_dest_addr)) {
             rt->crsf_retargeted++;
             frame = buf;
+        } else if (len >= 3 && crsf_frame_is_extended(buf[2])) {
+            /* Расширенный кадр переадресовать подменой первого байта
+             * нельзя: настоящий адресат лежит в payload и покрыт CRC.
+             * Такой кадр уходит в провод как есть, и это видно в
+             * диагностике — иначе выглядело бы, будто переадресация
+             * просто не сработала. */
+            rt->crsf_retarget_ext_skipped++;
         }
     }
 
@@ -402,6 +410,12 @@ uint32_t routing_manager_get_retargeted(uint8_t channel_id)
 {
     if (channel_id >= UART_MGR_NUM_CHANNELS) return 0;
     return s_rt[channel_id].crsf_retargeted;
+}
+
+uint32_t routing_manager_get_retarget_ext_skipped(uint8_t channel_id)
+{
+    if (channel_id >= UART_MGR_NUM_CHANNELS) return 0;
+    return s_rt[channel_id].crsf_retarget_ext_skipped;
 }
 
 uint32_t routing_manager_get_rate_dropped(uint8_t channel_id)

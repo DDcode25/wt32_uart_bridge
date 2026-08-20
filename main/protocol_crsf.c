@@ -397,10 +397,44 @@ size_t crsf_frame_check(const uint8_t *frame, size_t len)
  * половина кадра на общей шине — это занятая линия и мусор на встречной
  * стороне. Возвращает число разобранных кадров; *bad_bytes получает
  * количество байт, которые пришлось выбросить. */
+bool crsf_frame_is_extended(uint8_t type)
+{
+    if (type < 0x28) return false;
+    switch (type) {
+        /* Спецификация называет эти типы broadcast явным текстом либо
+         * описывает их payload без dest/origin. */
+        case 0x80:  /* ArduPilot passthrough */
+        case 0x81:  /* mLRS */
+        case 0x82:  /* mLRS */
+        case 0x88:  /* Rotorflight telemetry envelope */
+        case 0xAA:  /* CRSF MAVLink envelope */
+        case 0xAC:  /* CRSF MAVLink system status */
+            return false;
+        default:
+            return true;
+    }
+}
+
+bool crsf_frame_ext_addrs(const uint8_t *frame, size_t len,
+                          uint8_t *dest, uint8_t *origin)
+{
+    /* ADDR LEN TYPE DEST ORIGIN ... — заголовок занимает 5 байт. */
+    if (!frame || len < 5) return false;
+    if (!crsf_frame_is_extended(frame[2])) return false;
+    if (dest)   *dest   = frame[3];
+    if (origin) *origin = frame[4];
+    return true;
+}
+
 bool crsf_frame_retarget(uint8_t *frame, size_t len, uint8_t addr)
 {
     if (addr == 0) return false;                 /* выключено */
     if (crsf_frame_check(frame, len) == 0) return false;
+    /* У расширенного кадра адресат лежит в payload и покрыт CRC. Подмена
+     * первого байта его не перенаправит, зато создаст видимость, будто
+     * перенаправила. Такой кадр не трогаем — см. crsf_frame_retarget()
+     * в заголовке. */
+    if (crsf_frame_is_extended(frame[2])) return false;
     if (frame[0] == addr) return false;          /* уже нужный */
     frame[0] = addr;                             /* CRC не затрагивается */
     return true;

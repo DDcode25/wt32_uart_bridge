@@ -452,6 +452,7 @@ char *diagnostics_status_json(void)
             cJSON_AddNumberToObject(j, "out_queue_drops", sw.out_queue_drops);
             cJSON_AddNumberToObject(j, "echo_mismatches", sw.echo_mismatches);
             cJSON_AddNumberToObject(j, "pings_answered", sw.pings_answered);
+            cJSON_AddNumberToObject(j, "pings_ignored", sw.pings_ignored);
             cJSON_AddNumberToObject(j, "rx_to_tx_switches", sw.rx_to_tx_switches);
             cJSON_AddNumberToObject(j, "tx_to_rx_switches", sw.tx_to_rx_switches);
             cJSON_AddNumberToObject(j, "last_rx_ms", sw.last_rx_ms);
@@ -485,6 +486,8 @@ char *diagnostics_status_json(void)
                      * назначения — иначе подмена была бы невидимой. */
                     cJSON_AddNumberToObject(nj, "retargeted",
                                             routing_manager_get_retargeted(i));
+                    cJSON_AddNumberToObject(nj, "retarget_ext_skipped",
+                                            routing_manager_get_retarget_ext_skipped(i));
                     cJSON_AddNumberToObject(nj, "rate_dropped",
                                             routing_manager_get_rate_dropped(i));
                     cJSON_AddItemToObject(c, "crsf_from_net", nj);

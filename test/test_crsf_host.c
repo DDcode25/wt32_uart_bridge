@@ -510,6 +510,79 @@ static void test_retarget(void)
     CHECK(bad[0] == CRSF_ADDR_FLIGHT_CONTROLLER, "и остаётся нетронутым");
 }
 
+static void test_extended_header(void)
+{
+    printf("== расширенный заголовок ==\n");
+
+    /* Спецификация: тип 0x28 и выше — расширенный, кроме явно оговорённых
+     * broadcast-типов. */
+    CHECK(!crsf_frame_is_extended(CRSF_FRAMETYPE_LINK_STATISTICS), "0x14 простой");
+    CHECK(!crsf_frame_is_extended(CRSF_FRAMETYPE_RC_CHANNELS_PACKED), "0x16 простой");
+    CHECK(!crsf_frame_is_extended(0x27), "0x27 — последний простой");
+    CHECK(crsf_frame_is_extended(CRSF_FRAMETYPE_DEVICE_PING), "0x28 расширенный");
+    CHECK(crsf_frame_is_extended(CRSF_FRAMETYPE_DEVICE_INFO), "0x29 расширенный");
+    CHECK(crsf_frame_is_extended(CRSF_FRAMETYPE_MSP_REQ), "0x7A MSP расширенный");
+    CHECK(!crsf_frame_is_extended(0x80), "0x80 ArduPilot — broadcast");
+    CHECK(!crsf_frame_is_extended(0xAA), "0xAA MAVLink envelope — broadcast");
+    CHECK(!crsf_frame_is_extended(0xAC), "0xAC MAVLink status — broadcast");
+
+    /* Опрос устройств: payload = dest + origin. */
+    uint8_t ping_pl[2] = { CRSF_ADDR_CRSF_TRANSMITTER, CRSF_ADDR_RADIO_TRANSMITTER };
+    uint8_t fr[32];
+    size_t n = mkframe(CRSF_ADDR_BROADCAST, CRSF_FRAMETYPE_DEVICE_PING,
+                       ping_pl, sizeof(ping_pl), fr);
+    uint8_t dest = 0, origin = 0;
+    CHECK(crsf_frame_ext_addrs(fr, n, &dest, &origin), "адреса извлечены");
+    CHECK(dest == CRSF_ADDR_CRSF_TRANSMITTER, "адресат — модуль");
+    CHECK(origin == CRSF_ADDR_RADIO_TRANSMITTER, "источник — пульт");
+
+    /* Ровно эта проверка и решает, отвечать ли на опрос. Опрос чужому
+     * устройству отвечать нельзя: мы бьём в его слот. */
+    CHECK(dest == CRSF_ADDR_SELF, "опрос адресован нам — отвечаем");
+    uint8_t other_pl[2] = { CRSF_ADDR_RECEIVER, CRSF_ADDR_RADIO_TRANSMITTER };
+    size_t on = mkframe(CRSF_ADDR_BROADCAST, CRSF_FRAMETYPE_DEVICE_PING,
+                        other_pl, sizeof(other_pl), fr);
+    CHECK(crsf_frame_ext_addrs(fr, on, &dest, NULL) &&
+          dest != CRSF_ADDR_SELF && dest != CRSF_ADDR_BROADCAST,
+          "опрос приёмнику — не наш");
+
+    /* У простого кадра адресов в payload нет, и читать их оттуда нельзя. */
+    uint8_t ls_pl[10] = {0};
+    size_t ln = mkframe(CRSF_ADDR_FLIGHT_CONTROLLER, CRSF_FRAMETYPE_LINK_STATISTICS,
+                        ls_pl, sizeof(ls_pl), fr);
+    CHECK(!crsf_frame_ext_addrs(fr, ln, &dest, &origin), "у 0x14 адресов не берём");
+
+    /* Обрезанный кадр: заголовок не дочитать. */
+    CHECK(!crsf_frame_ext_addrs(fr, 4, &dest, &origin), "короче заголовка — false");
+}
+
+static void test_retarget_extended(void)
+{
+    printf("== переадресация не трогает расширенные кадры ==\n");
+
+    /* Настоящий адресат расширенного кадра лежит в payload и покрыт CRC.
+     * Подмена первого байта его не перенаправляет — значит делать её
+     * нельзя: получилась бы видимость доставки. */
+    uint8_t pl[16] = { CRSF_ADDR_RADIO_TRANSMITTER, CRSF_ADDR_CRSF_TRANSMITTER,
+                       'W','T','3','2','B','R', 0, 1, 2, 3, 4, 5, 6, 7 };
+    uint8_t fr[32];
+    size_t n = mkframe(CRSF_ADDR_FLIGHT_CONTROLLER, CRSF_FRAMETYPE_DEVICE_INFO,
+                       pl, sizeof(pl), fr);
+
+    CHECK(!crsf_frame_retarget(fr, n, CRSF_ADDR_RECEIVER),
+          "0x29 не переадресуется");
+    CHECK(fr[0] == CRSF_ADDR_FLIGHT_CONTROLLER, "первый байт не тронут");
+    CHECK(fr[3] == CRSF_ADDR_RADIO_TRANSMITTER, "адресат внутри тоже не тронут");
+    CHECK(crsf_frame_check(fr, n) == n, "кадр остался целым");
+
+    /* А широковещательный — переадресуется, как и раньше. */
+    uint8_t ls[10] = {0};
+    size_t ln = mkframe(CRSF_ADDR_FLIGHT_CONTROLLER, CRSF_FRAMETYPE_LINK_STATISTICS,
+                        ls, sizeof(ls), fr);
+    CHECK(crsf_frame_retarget(fr, ln, CRSF_ADDR_RADIO_TRANSMITTER),
+          "0x14 переадресуется по-прежнему");
+}
+
 static void test_echo_hist(void)
 {
     printf("== узнавание собственного кадра целиком ==\n");
@@ -647,6 +720,8 @@ int main(void)
     test_udp_route();
     test_echo();
     test_retarget();
+    test_extended_header();
+    test_retarget_extended();
     test_echo_hist();
 
     printf("\n%s: %d проверок, %d провалов\n",

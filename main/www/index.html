@@ -921,6 +921,7 @@ async function poll(){
            row('Ехо знято / спотворено',num(w.echo_suppressed)+' / '+
                (w.echo_mismatches>0?`<span class="warn">${num(w.echo_mismatches)}</span>`:'0'))+
            row('Відповідей на опит пристроїв',num(w.pings_answered))+
+           row('Опитів не нам (проігноровано)',num(w.pings_ignored))+
            row('Розворотів лінії rx→tx / tx→rx',num(w.rx_to_tx_switches)+' / '+num(w.tx_to_rx_switches))+
            row('Найдовший розбір пачки',w.rx_processing_max_us+' мкс');
       }
@@ -928,6 +929,15 @@ async function poll(){
         t+=crsfTele(c.crsf_from_net);
         if(c.crsf_from_net.bad_bytes>0)t+=row('Брак із мережі',
           `<span class="warn">${num(c.crsf_from_net.bad_bytes)} Б</span> <span class="mut">— не склалося в цілий кадр, у дріт не пішло</span>`);
+        /* Ці три лічильники раніше були лише в JSON. Підміна адреси й
+           обмеження частоти змінюють те, що йде у дріт, — вони мусять
+           бути видимі, інакше зміну ніяк не пояснити. */
+        if(c.crsf_from_net.retargeted>0)t+=row('Переадресовано кадрів',
+          num(c.crsf_from_net.retargeted));
+        if(c.crsf_from_net.retarget_ext_skipped>0)t+=row('Не переадресовано',
+          `<span class="warn">${num(c.crsf_from_net.retarget_ext_skipped)}</span> <span class="mut">— розширений заголовок: справжній адресат лежить у payload під CRC, підміна першого байта його не перенаправляє. Кадр пішов як є</span>`);
+        if(c.crsf_from_net.rate_dropped>0)t+=row('Відкинуто за стелею частоти',
+          `<span class="warn">${num(c.crsf_from_net.rate_dropped)}</span> <span class="mut">— джерело віддає швидше, ніж дозволено в налаштуваннях каналу</span>`);
       }
       if(c.sbus){t+=row('S.Bus кадрів',c.sbus.rx_frames_total)+row('Помилок кадру',c.sbus.frame_errors)+
         row('Failsafe',c.sbus.failsafe?'<span class="err">ТАК</span>':'ні')+

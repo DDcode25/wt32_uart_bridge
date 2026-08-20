@@ -147,6 +147,10 @@ uint32_t routing_manager_get_net_bad_bytes(uint8_t channel_id);
 /* Сколько кадров ушло в провод со смененным адресом назначения. */
 uint32_t routing_manager_get_retargeted(uint8_t channel_id);
 
+/* Кадры с расширенным заголовком, которым переадресация запрошена, но
+ * не применима: их адресат внутри payload и покрыт CRC. */
+uint32_t routing_manager_get_retarget_ext_skipped(uint8_t channel_id);
+
 /* Сколько кадров отброшено ограничителем темпа. */
 uint32_t routing_manager_get_rate_dropped(uint8_t channel_id);
 
