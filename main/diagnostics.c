@@ -451,6 +451,7 @@ char *diagnostics_status_json(void)
             cJSON_AddNumberToObject(j, "echo_frames_dropped", sw.echo_frames_dropped);
             cJSON_AddNumberToObject(j, "out_queue_drops", sw.out_queue_drops);
             cJSON_AddNumberToObject(j, "echo_mismatches", sw.echo_mismatches);
+            cJSON_AddNumberToObject(j, "tx_in_slot", sw.tx_in_slot);
             cJSON_AddNumberToObject(j, "pings_answered", sw.pings_answered);
             cJSON_AddNumberToObject(j, "pings_ignored", sw.pings_ignored);
             cJSON_AddNumberToObject(j, "rx_to_tx_switches", sw.rx_to_tx_switches);

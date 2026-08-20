@@ -659,6 +659,7 @@ char *config_manager_to_json(const app_config_t *cfg)
         cJSON_AddNumberToObject(c, "sw_tx_queue_frames", u->sw_tx_queue_frames);
         cJSON_AddNumberToObject(c, "sw_tx_max_age_ms", u->sw_tx_max_age_ms);
         cJSON_AddNumberToObject(c, "sw_tx_min_gap_us", u->sw_tx_min_gap_us);
+        cJSON_AddBoolToObject(c, "sw_slot_reply", u->sw_slot_reply != 0);
         cJSON_AddNumberToObject(c, "sw_idle_wait_ms", u->sw_idle_wait_ms);
         cJSON_AddNumberToObject(c, "sw_rx_timeout_symbols", u->sw_rx_timeout_symbols);
         cJSON_AddNumberToObject(c, "sw_echo_window_ms", u->sw_echo_window_ms);
@@ -819,6 +820,7 @@ esp_err_t config_manager_from_json(const char *json, app_config_t *out)
             if (v >= 0 && v <= 10000) u->sw_tx_max_age_ms = (uint16_t)v;
             v = json_int(c, "sw_tx_min_gap_us", u->sw_tx_min_gap_us);
             if (v >= 0 && v <= 60000) u->sw_tx_min_gap_us = (uint16_t)v;
+            u->sw_slot_reply = json_bool(c, "sw_slot_reply", u->sw_slot_reply != 0) ? 1 : 0;
             v = json_int(c, "sw_idle_wait_ms", u->sw_idle_wait_ms);
             if (v >= 0 && v <= 250) u->sw_idle_wait_ms = (uint8_t)v;
             v = json_int(c, "sw_rx_timeout_symbols", u->sw_rx_timeout_symbols);

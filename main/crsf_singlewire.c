@@ -350,6 +350,11 @@ static void transmit_frame(const uint8_t *data, size_t len)
  *
  * Каждая причина отказа считается отдельно: по этим счётчикам и видно,
  * занята ли линия, медленнее ли она источника, или настройка неверна. */
+/* Взводится приёмным путём сразу после разбора пачки: ведущий отговорил,
+ * линия свободна, и если он ждёт ответа — ждёт он его сейчас. Снимается
+ * первым же обращением к передаче. */
+static volatile bool s_in_slot = false;
+
 static void service_tx(void)
 {
     uint32_t now = now_ms();
@@ -370,9 +375,20 @@ static void service_tx(void)
     if (!have) return;
 
     /* Ровный такт вместо залпа: между своими посылками выдерживаем паузу,
-     * чтобы встречной стороне было куда ответить. */
+     * чтобы встречной стороне было куда ответить.
+     *
+     * Исключение — слот ведущего. Спецификация описывает однопроводную
+     * линию как ведущий/ведомый: пульт шлёт кадр, отпускает линию и ждёт
+     * ответа именно тут. Пауза, посчитанная от НАШЕЙ прошлой посылки, к
+     * этому моменту отношения не имеет: промолчав, мы пропускаем слот
+     * целиком и следующего ждать ещё период. */
+    bool in_slot = s_in_slot;
+    s_in_slot = false;
+    bool slot_now = in_slot && s.cfg.slot_reply;
+
     int64_t now_us = esp_timer_get_time();
-    if (s.last_tx_us && (now_us - s.last_tx_us) < (int64_t)cfg_or(s.cfg.tx_min_gap_us, CRSF_SW_TX_MIN_GAP_US)) return;
+    if (!slot_now && s.last_tx_us &&
+        (now_us - s.last_tx_us) < (int64_t)cfg_or(s.cfg.tx_min_gap_us, CRSF_SW_TX_MIN_GAP_US)) return;
 
     /* Линия должна быть тихой. Если в буфере уже что-то есть, значит
      * встречная сторона заговорила — лучше промолчать: наш кадр всё равно
@@ -392,6 +408,7 @@ static void service_tx(void)
     if (res != CRSF_TXQ_OK) return;
 
     transmit_frame(frame, flen);
+    if (slot_now) s.stats.tx_in_slot++;
     s.last_tx_us = esp_timer_get_time();
 }
 
@@ -407,7 +424,9 @@ static void crsf_sw_task(void *arg)
          * Второе и есть аппаратный признак конца кадра. */
         if (xQueueReceive(s.evt_queue, &evt, pdMS_TO_TICKS(cfg_or(s.cfg.idle_wait_ms, CRSF_SW_IDLE_WAIT_MS))) != pdTRUE) {
             /* Тишина на линии: встречная сторона молчит, синхронизировать
-             * не с чем — можно отдать накопленное сразу. */
+             * не с чем — можно отдать накопленное сразу. Слотом это не
+             * считается: никто его не открывал, и пауза здесь работает. */
+            s_in_slot = false;
             service_tx();
             continue;
         }
@@ -473,7 +492,9 @@ static void crsf_sw_task(void *arg)
                 uint32_t dt = (uint32_t)esp_timer_get_time() - t0;
                 if (dt > s.stats.rx_processing_max_us) s.stats.rx_processing_max_us = dt;
 
-                /* Пачка разобрана, линия свободна — наш промежуток. */
+                /* Пачка разобрана, линия свободна — наш промежуток. И если
+                 * ведущий ждёт ответа, ждёт он его именно сейчас. */
+                s_in_slot = true;
                 service_tx();
                 break;
             }

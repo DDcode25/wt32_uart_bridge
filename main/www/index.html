@@ -344,7 +344,7 @@ function syncOneWire(id){
   }
 
   const one=(+dup.value===1);
-  ['_elrow','_swrow2','_swrow3'].forEach(k=>{const r=el('c'+id+k); if(r)r.style.display=one?'':'none';});
+  ['_elrow','_swrow2','_swrow3','_swrow4'].forEach(k=>{const r=el('c'+id+k); if(r)r.style.display=one?'':'none';});
   rxrow.style.display=one?'none':'';
   txlbl.textContent=one?'CRSF GPIO (один провід)':'TX GPIO';
   if(one){const rx=el('c'+id+'_rx'),tx=el('c'+id+'_tx');if(rx&&tx)rx.value=tx.value;}
@@ -482,6 +482,9 @@ function uartForm(c){
     ${swNum(id,'rxto',c.sw_rx_timeout_symbols,SWDEF.rxto,126,60,'таймаут «лінія замовкла», символів')}
     ${swNum(id,'ew',c.sw_echo_window_ms,SWDEF.ew,10000,60,'вікно впізнавання власного відлуння, мс')}
     <span class="hint">мкс / мс / симв. / мс</span></div>
+  <div class="row" id="c${id}_swrow4"><label title="Специфікація CRSF описує однопровідну лінію як ведучий/ведений: пульт шле ОДИН кадр, відпускає лінію й чекає відповіді саме тут. Пауза між своїми посилками до цього моменту стосунку не має — промовчавши, міст пропускає слот цілком. З галочкою посилка одразу після прийнятого кадру йде повз перевірку паузи; для посилок за тиші пауза працює як раніше. НЕ ПЕРЕВІРЕНО НА ЗАЛІЗІ — вмикати із заміром">Відповідь у слот ведучого</label>
+    <label style="flex:0 0 auto"><input type="checkbox" id="c${id}_slot"${c.sw_slot_reply?' checked':''}> відповідати одразу після кадру ведучого</label>
+    <span class="hint">лічильник «посилок у слот» на вкладці Diagnostics покаже, чи режим узагалі спрацьовує</span></div>
   <div class="row"><span class="hint"><b>Порожнє поле — значення за замовчуванням, воно показане сірим у самому полі.</b>
     Усі шість похідні від ТЕМПУ лінії й розраховані на CRSF 400000 бод, 250 кадрів/с.
     Глибина черги та придатність задають пріоритет СВІЖОСТІ над збереженням: для керування застарілий кадр шкідливіший за втрачений, бо описує положення стика, якого вже немає — збільшення дасть не менше втрат, а затримку. Піднімати їх має сенс там, де в дріт іде телеметрія, а не керування.</span></div>
@@ -595,6 +598,7 @@ function collect(){
     if((t=num0('c'+i+'_q',16))!==undefined)c.sw_tx_queue_frames=t;
     if((t=num0('c'+i+'_age',10000))!==undefined)c.sw_tx_max_age_ms=t;
     if((t=num0('c'+i+'_gap',60000))!==undefined)c.sw_tx_min_gap_us=t;
+    if(g('c'+i+'_slot'))c.sw_slot_reply=g('c'+i+'_slot').checked;
     if((t=num0('c'+i+'_idle',250))!==undefined)c.sw_idle_wait_ms=t;
     if((t=num0('c'+i+'_rxto',126))!==undefined)c.sw_rx_timeout_symbols=t;
     if((t=num0('c'+i+'_ew',10000))!==undefined)c.sw_echo_window_ms=t;
@@ -928,6 +932,7 @@ async function poll(){
            row('Лінію утримано понад норму',bad(w.tx_hold_overruns))+
            row('Ехо знято / спотворено',num(w.echo_suppressed)+' / '+
                (w.echo_mismatches>0?`<span class="warn">${num(w.echo_mismatches)}</span>`:'0'))+
+           row('Посилок у слот ведучого',num(w.tx_in_slot))+
            row('Відповідей на опит пристроїв',num(w.pings_answered))+
            row('Опитів не нам (проігноровано)',num(w.pings_ignored))+
            row('Розворотів лінії rx→tx / tx→rx',num(w.rx_to_tx_switches)+' / '+num(w.tx_to_rx_switches))+
